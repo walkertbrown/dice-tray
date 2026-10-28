@@ -211,3 +211,7 @@
 	border-top: 1px dashed var(--background-modifier-border);
 	padding-top: 0.15em;
 }
+.dice-tray-die-stunt {
+	background: var(--dt-accent);
+	color: var(--text-on-accent);
+}

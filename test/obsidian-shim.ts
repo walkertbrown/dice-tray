@@ -73,11 +73,19 @@ function cacheFor(content: string) {
 		off += line.length + (i < lines.length - 1 ? 1 : 0);
 	});
 	closeSec(content.length);
-	return { headings, blocks, sections };
+	// flat `key: value` frontmatter, numbers as numbers
+	let frontmatter: Record<string, unknown> | undefined;
+	const fm = /^---\n([\s\S]*?)\n---/.exec(content);
+	if (fm) {
+		frontmatter = {};
+		for (const m of fm[1]!.matchAll(/^(\w[\w ]*):\s*(.*)$/gm)) frontmatter[m[1]!] = /^-?\d+(\.\d+)?$/.test(m[2]!) ? Number(m[2]) : m[2];
+	}
+	return { headings, blocks, sections, frontmatter };
 }
 
 export class App {
 	notes = new Map<string, FakeNote>();
+	workspace = { getActiveFile: (): TFile | null => null };
 	metadataCache = {
 		getFirstLinkpathDest: (link: string): TFile | null => {
 			const n = this.notes.get(link) ?? this.notes.get(link + '.md');
@@ -90,6 +98,7 @@ export class App {
 	};
 	vault = {
 		cachedRead: async (f: TFile) => (this.notes.get(f.path) ?? this.notes.get(f.basename))!.content,
+		getFileByPath: (p: string): TFile | null => (this.notes.has(p) ? new TFile(p) : null),
 	};
 }
 

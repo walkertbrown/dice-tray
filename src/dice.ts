@@ -3,7 +3,9 @@
 // Reads the notation the Dice Roller plugin's `dice:` blocks use:
 //   3d6 + 2, (1d4+2)*2, d20, 2d20kh1, 4d6dl1, 1d6!, 1d6!!, 1d6!i, 1d6!>4,
 //   4d6r, 4d6ri, 4d6r<3, 5d10>=8 (count successes), 4dF, d%, d66%, 3d[2,5],
-//   8d6s, 8d6sd, 3d6u.
+//   8d6s, 8d6sd, 3d6u, 1dS (Fantasy AGE stunt dice).
+// Names of numbers from the note (frontmatter or `field:: 3`) can stand in for
+// numbers when they are passed as `vars`: 1d20 + dex.
 
 export type Rng = () => number; // uniform in [0, 1)
 
@@ -15,6 +17,7 @@ export interface Die {
 	kept: boolean;
 	exploded?: boolean; // this die came from an explosion
 	rerolled?: boolean; // this die was rerolled (shown struck out)
+	stunt?: boolean; // the stunt die of a Fantasy AGE roll
 }
 
 export interface DiceGroup {
@@ -23,6 +26,7 @@ export interface DiceGroup {
 	dice: Die[];
 	total: number;
 	successes?: number; // set when a success condition was given
+	stuntPoints?: number; // Fantasy AGE: doubles were rolled, worth the stunt die
 }
 
 export interface RollResult {
@@ -34,6 +38,7 @@ export interface RollResult {
 export interface RollOptions {
 	rng?: Rng;
 	defaultFaces?: number; // for a bare "d" with no faces, default 100 like Dice Roller
+	vars?: Record<string, number>; // named numbers from the note
 }
 
 const MAX_DICE = 1000;
@@ -57,6 +62,7 @@ interface DiceSpec {
 	max: number;
 	fudge: boolean;
 	d66: boolean;
+	stunt: boolean;
 	keep?: { high: boolean; n: number };
 	drop?: { high: boolean; n: number };
 	explode?: { times: number; compound: boolean; cond?: Condition };
@@ -67,7 +73,7 @@ interface DiceSpec {
 }
 
 const DICE_RE =
-	/^(\d*)[dD](\d+%?|%|[fF]|\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\])?/;
+	/^(\d*)[dD](\d+%?|%|[fF]|S|\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\])?/;
 const COND_RE = /^(>=|<=|=!|!=|>|<|=)(-?\d+)/;
 
 function parseCond(s: string, i: number): [Condition | undefined, number] {
@@ -92,9 +98,16 @@ function parseDice(s: string, start: number, opts: RollOptions): [Tok, number] {
 		max: 0,
 		fudge: false,
 		d66: false,
+		stunt: false,
 		unique: false,
 	};
-	if (faceRaw === '%') {
+	if (faceRaw === 'S') {
+		// Fantasy AGE: three d6, one of them the stunt die
+		if (count !== 1) throw new DiceError('Roll stunt dice one at a time: 1dS');
+		spec.stunt = true;
+		spec.count = 3;
+		spec.max = 6;
+	} else if (faceRaw === '%') {
 		spec.max = 100;
 		spec.faces = '%';
 	} else if (faceRaw === 'F' || faceRaw === 'f') {
@@ -164,6 +177,19 @@ export function tokenize(src: string, opts: RollOptions = {}): Tok[] {
 		const c = s[i] as string;
 		if (c === '(') { out.push({ t: '(' }); i++; continue; }
 		if (c === ')') { out.push({ t: ')' }); i++; continue; }
+		if (/[A-Za-z_]/.test(c)) {
+			// a named number from the note, if there is one by that name
+			const name = /^[A-Za-z_]\w*/.exec(s.slice(i))![0];
+			const vars = opts.vars ?? {};
+			const key = Object.keys(vars).find((k) => k.toLowerCase() === name.toLowerCase());
+			if (key !== undefined) {
+				out.push({ t: 'num', v: vars[key]!, raw: name });
+				i += name.length;
+				continue;
+			}
+			if (!/^[dD](\d|%|[fFS]|\[|$)/.test(name) || (name.length > 1 && /^[dD][a-zA-Z_]/.test(name) && !/^[dD][fFS]$/.test(name)))
+				throw new DiceError(`No field "${name}" in this note`);
+		}
 		if ('+-*/^'.includes(c)) { out.push({ t: 'op', v: c as '+' }); i++; continue; }
 		if (/[\dDd]/.test(c)) {
 			// dice if a "d" follows the optional count
@@ -285,6 +311,12 @@ export function rollGroup(spec: DiceSpec, raw: string, rng: Rng): DiceGroup {
 
 	const kept = dice.filter((d) => d.kept);
 	const group: DiceGroup = { notation: raw, faces: spec.faces, dice, total: 0 };
+	if (spec.stunt) {
+		const last = dice[dice.length - 1]!;
+		last.stunt = true;
+		const values = dice.map((d) => d.value);
+		if (new Set(values).size < values.length) group.stuntPoints = last.value;
+	}
 	if (spec.success) {
 		group.successes = kept.filter((d) => test(spec.success, d.value)).length;
 		group.total = group.successes;
@@ -406,11 +438,28 @@ export function describe(r: RollResult): string {
 			.map((d) => (d.kept ? String(d.value) : `~${d.value}~`) + (d.exploded ? '!' : ''))
 			.join(', ');
 		const s = g.successes !== undefined ? ` (${g.successes} successes)` : '';
-		return `${g.notation} [${dice}]${s}`;
+		const sp = g.stuntPoints !== undefined ? ` (${g.stuntPoints} stunt points)` : '';
+		return `${g.notation} [${dice}]${s}${sp}`;
 	});
 	return `${parts.join('; ')} = ${formatNumber(r.total)}`;
 }
 
 export function formatNumber(n: number): string {
 	return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+}
+
+// The roll written out the way it happened, for writing into a note:
+// "3d100 + 12 -> [75, 20, 75] + 12 -> 182"
+export function spelledOut(r: RollResult): string {
+	let rest = r.expression;
+	let mid = '';
+	for (const g of r.groups) {
+		const at = rest.indexOf(g.notation);
+		const kept = '[' + g.dice.filter((d) => d.kept).map((d) => d.value).join(', ') + ']';
+		if (at < 0) { mid += kept; continue; }
+		mid += rest.slice(0, at) + kept;
+		rest = rest.slice(at + g.notation.length);
+	}
+	mid += rest;
+	return mid === r.expression ? `${r.expression} -> ${formatNumber(r.total)}` : `${r.expression} -> ${mid} -> ${formatNumber(r.total)}`;
 }

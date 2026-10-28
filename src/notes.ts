@@ -111,3 +111,19 @@ export function parseNoteRoll(src: string): NoteRoll | null {
 	}
 	return r;
 }
+
+// Numbers a note names, for formulas like `1d20 + dex`: frontmatter values first, then
+// Dataview-style `field:: 3` lines and `[field:: 3]` inline, which win. Names keep only
+// letters, digits and underscores, so "Armor Class:: 15" is `Armor_Class`.
+export function noteFields(text: string, frontmatter?: Record<string, unknown>): Record<string, number> {
+	const out: Record<string, number> = {};
+	const put = (k: string, v: unknown) => {
+		const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(v) ? Number(v) : NaN;
+		const name = k.trim().replace(/\W+/g, '_');
+		if (Number.isFinite(n) && /^[A-Za-z_]/.test(name)) out[name] = n;
+	};
+	for (const [k, v] of Object.entries(frontmatter ?? {})) put(k, v);
+	for (const m of text.matchAll(/^[ \t]*(?:[-*+][ \t]+)?([A-Za-z_][\w ]*?)::[ \t]*(-?\d+(?:\.\d+)?)[ \t]*$/gm)) put(m[1]!, m[2]);
+	for (const m of text.matchAll(/[[(]([A-Za-z_][\w ]*?)::[ \t]*(-?\d+(?:\.\d+)?)[ \t]*[\])]/g)) put(m[1]!, m[2]);
+	return out;
+}

@@ -132,6 +132,23 @@ describe('Dice Tray in a (fake) note', () => {
 		for (const t of items) expect(t).not.toMatch(/^#|^tags:/);
 	});
 
+	it('fills in fields from the note the roll is in', async () => {
+		(plugin.app as unknown as App).notes.set('Game.md', { path: 'Game.md', content: '---\ndex: 3\n---\nstr:: 2\n' });
+		const el = render(plugin, '<p><code>dice: 1d1 + dex + str</code> <code>dice: 1d20 + wis</code></p>');
+		await tick();
+		expect(el.querySelector('.dice-tray-total')!.textContent).toBe('6');
+		expect(el.querySelector('.dice-tray-error')!.textContent).toBe('No field "wis" in this note');
+	});
+
+	it('rolls narrative pools and stunt dice', () => {
+		const el = render(plugin, '<p><code>dice: 2g1p</code> <code>dice: 1dS</code></p>');
+		const [pool, stunt] = Array.from(el.querySelectorAll('.dice-tray-total')).map((t) => t.textContent!);
+		expect(pool).toMatch(/success|failure/);
+		expect(el.querySelector('.dice-tray-narrative')!.getAttribute('title')).toMatch(/^2g1p: ability: /);
+		expect(stunt).toMatch(/^\d+( \(\d SP\))?$/);
+		expect(el.querySelectorAll('.dice-tray-die-stunt').length).toBe(1);
+	});
+
 	it('reports a missing note', async () => {
 		const el = render(plugin, '<p><code>dice: [[Nowhere]]</code></p>');
 		await tick();

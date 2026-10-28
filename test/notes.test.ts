@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isLookupTable, lookupRow, parseLines, parseList, parseNoteRoll, parseTable, pick, tableRows } from '../src/notes';
+import { isLookupTable, lookupRow, noteFields, parseLines, parseList, parseNoteRoll, parseTable, pick, tableRows } from '../src/notes';
 
 const TABLE = `
 | d6 | Weather | Note |
@@ -61,5 +61,15 @@ describe('pick', () => {
 	it('uses the rng', () => {
 		expect(pick(['a', 'b', 'c'], () => 0.99)).toBe('c');
 		expect(() => pick([])).toThrow();
+	});
+});
+
+describe('noteFields', () => {
+	it('reads frontmatter numbers and field lines, field lines winning', () => {
+		const text = 'Str:: 16\n- dex:: 3\nThe [prof:: 2] bonus, (ac:: 15).\nname:: Vex\nwis: 4';
+		expect(noteFields(text, { level: 5, dex: 1, hp: '22', class: 'rogue' })).toEqual({ level: 5, dex: 3, hp: 22, Str: 16, prof: 2, ac: 15 });
+	});
+	it('turns spaces in names into underscores', () => {
+		expect(noteFields('Armor Class:: 15')).toEqual({ Armor_Class: 15 });
 	});
 });

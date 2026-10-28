@@ -12,7 +12,8 @@ import {
 	setIcon,
 } from 'obsidian';
 import { average, describe, DiceError, formatNumber, roll, RollResult } from './dice';
-import { isLookupTable, lookupRow, NoteRoll, parseLines, parseList, parseNoteRoll, parseTable, pick, tableRows } from './notes';
+import { isNarrative, narrativeDetail, narrativeText, rollNarrative } from './narrative';
+import { isLookupTable, lookupRow, NoteRoll, noteFields, parseLines, parseList, parseNoteRoll, parseTable, pick, tableRows } from './notes';
 
 interface DiceTraySettings {
 	defaultFaces: number;
@@ -56,6 +57,11 @@ function parseBlock(src: string): Parsed | null {
 	return { expression, flags, text, note: note ?? undefined };
 }
 
+// a word in the formula that isn't dice notation, like "dex" in `1d20 + dex`
+function hasField(expression: string): boolean {
+	return /(^|[^\dA-Za-z])(?![dD](\d|%|[fFS]\b|\[|\b))[A-Za-z_]/.test(expression);
+}
+
 export default class DiceTrayPlugin extends Plugin {
 	settings: DiceTraySettings = DEFAULT_SETTINGS;
 
@@ -89,10 +95,19 @@ export default class DiceTrayPlugin extends Plugin {
 		}
 	}
 
-	doRoll(expression: string): RollResult {
-		const r = roll(expression, { defaultFaces: this.settings.defaultFaces });
+	doRoll(expression: string, vars?: Record<string, number>): RollResult {
+		const r = roll(expression, { defaultFaces: this.settings.defaultFaces, vars });
 		r.total = this.round(r.total);
 		return r;
+	}
+
+	// Numbers named in the note, read only when the formula has a word in it besides dice
+	async noteVars(expression: string, path: string | undefined): Promise<Record<string, number> | undefined> {
+		if (!path || !hasField(expression)) return undefined;
+		const file = this.app.vault.getFileByPath(path);
+		if (!file) return undefined;
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+		return noteFields(await this.app.vault.cachedRead(file), fm);
 	}
 
 	private processInline(el: HTMLElement, ctx: MarkdownPostProcessorContext) {
@@ -107,9 +122,11 @@ export default class DiceTrayPlugin extends Plugin {
 
 	renderRoll(p: Parsed, ctx: MarkdownPostProcessorContext): HTMLElement {
 		if (p.note) return this.renderNoteRoll(p, p.note, ctx);
+		if (isNarrative(p.expression)) return this.renderNarrative(p);
 		const chip = createSpan({ cls: 'dice-tray' });
 		if (p.flags.has('avg')) {
 			try {
+				// the average can't wait for the note, so a field in it shows as missing
 				const avg = average(p.expression, { defaultFaces: this.settings.defaultFaces });
 				chip.addClass('dice-tray-avg');
 				chip.createSpan({ cls: 'dice-tray-total', text: formatNumber(this.round(avg)) });
@@ -134,7 +151,8 @@ export default class DiceTrayPlugin extends Plugin {
 			} else if (p.flags.has('none')) {
 				total.setText('');
 			} else {
-				total.setText(formatNumber(r.total));
+				const sp = r.groups.find((g) => g.stuntPoints !== undefined)?.stuntPoints;
+				total.setText(formatNumber(r.total) + (sp !== undefined ? ` (${sp} SP)` : ''));
 			}
 			chip.title = describe(r);
 			chip.removeClass('dice-tray-crit', 'dice-tray-fumble');
@@ -147,10 +165,12 @@ export default class DiceTrayPlugin extends Plugin {
 			this.renderPips(chip, r);
 		};
 
-		const go = () => {
+		const go = async () => {
 			let r: RollResult;
 			try {
-				r = this.doRoll(p.expression);
+				// most rolls name no field, and those land at once, without waiting on the note
+				const vars = hasField(p.expression) ? await this.noteVars(p.expression, ctx.sourcePath) : undefined;
+				r = this.doRoll(p.expression, vars);
 			} catch (e) {
 				this.renderError(chip, e);
 				return;
@@ -159,6 +179,33 @@ export default class DiceTrayPlugin extends Plugin {
 			else showResult(r);
 		};
 
+		chip.setAttr('role', 'button');
+		chip.setAttr('aria-label', `Roll ${p.expression}`);
+		chip.addEventListener('click', (ev) => {
+			ev.preventDefault();
+			void go();
+		});
+		void go();
+		return chip;
+	}
+
+	// Genesys and Star Wars pools: the net result, each die on hover
+	private renderNarrative(p: Parsed): HTMLElement {
+		const chip = createSpan({ cls: 'dice-tray dice-tray-narrative' });
+		const icon = chip.createSpan({ cls: 'dice-tray-icon' });
+		setIcon(icon, 'dices');
+		if (p.flags.has('nodice')) icon.hide();
+		const total = chip.createSpan({ cls: 'dice-tray-total' });
+		const go = () => {
+			try {
+				const r = rollNarrative(p.expression);
+				chip.removeClass('dice-tray-error');
+				total.setText(p.text ?? narrativeText(r));
+				chip.title = `${p.expression}: ${narrativeDetail(r)}`;
+			} catch (e) {
+				this.renderError(chip, e);
+			}
+		};
 		chip.setAttr('role', 'button');
 		chip.setAttr('aria-label', `Roll ${p.expression}`);
 		chip.addEventListener('click', (ev) => {
@@ -309,8 +356,11 @@ export default class DiceTrayPlugin extends Plugin {
 				const t = tiles.createSpan({ cls: 'dice-tray-die', text: String(d.value) });
 				if (!d.kept) t.addClass('dice-tray-die-dropped');
 				if (d.exploded) t.addClass('dice-tray-die-exploded');
+				if (d.stunt) t.addClass('dice-tray-die-stunt');
 			}
-			if (g.successes !== undefined) {
+			if (g.stuntPoints !== undefined) {
+				row.createSpan({ cls: 'dice-tray-row-total', text: `${g.stuntPoints} SP` });
+			} else if (g.successes !== undefined) {
 				row.createSpan({ cls: 'dice-tray-row-total', text: `${g.successes} ✓` });
 			} else if (g.dice.length > 1) {
 				row.createSpan({ cls: 'dice-tray-row-total', text: `= ${g.total}` });
@@ -339,6 +389,7 @@ export default class DiceTrayPlugin extends Plugin {
 }
 
 class RollModal extends Modal {
+	private notePath = this.app.workspace.getActiveFile()?.path;
 	constructor(app: App, private plugin: DiceTrayPlugin) {
 		super(app);
 	}
@@ -361,10 +412,17 @@ class RollModal extends Modal {
 			const expr = input.value.trim();
 			if (!expr) return;
 			try {
-				const r = this.plugin.doRoll(expr);
 				out.empty();
-				out.createDiv({ cls: 'dice-tray-modal-total', text: formatNumber(r.total) });
-				out.createDiv({ cls: 'dice-tray-modal-detail', text: describe(r) });
+				if (isNarrative(expr)) {
+					const n = rollNarrative(expr);
+					out.createDiv({ cls: 'dice-tray-modal-total', text: narrativeText(n) });
+					out.createDiv({ cls: 'dice-tray-modal-detail', text: narrativeDetail(n) });
+				} else {
+					// fields come from the note that was open when the modal was
+					const r = this.plugin.doRoll(expr, await this.plugin.noteVars(expr, this.notePath));
+					out.createDiv({ cls: 'dice-tray-modal-total', text: formatNumber(r.total) });
+					out.createDiv({ cls: 'dice-tray-modal-detail', text: describe(r) });
+				}
 				const hist = [expr, ...this.plugin.settings.history.filter((h) => h !== expr)].slice(0, 8);
 				this.plugin.settings.history = hist;
 				await this.plugin.saveSettings();
