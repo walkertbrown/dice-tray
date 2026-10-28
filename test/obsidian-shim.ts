@@ -1,5 +1,6 @@
 // A tiny stand-in for the `obsidian` module so main.ts can run under jsdom.
 // Only what Dice Tray touches is here.
+import { StateField, type Extension } from '@codemirror/state';
 
 type Opts = { cls?: string; text?: string; type?: string; placeholder?: string; attr?: Record<string, string> };
 
@@ -116,9 +117,15 @@ export class App {
 }
 
 export class Component {
+	children: Component[] = [];
 	load() {}
 	unload() {}
+	addChild<T extends Component>(c: T): T { this.children.push(c); return c; }
 }
+
+// The editor's own fields: in Obsidian, whether it is in Live Preview, and the note it shows.
+export const editorLivePreviewField = StateField.define<boolean>({ create: () => true, update: (v) => v });
+export const editorInfoField = StateField.define<{ file: TFile | null }>({ create: () => ({ file: null }), update: (v) => v });
 export class MarkdownRenderChild extends Component {
 	constructor(public containerEl: HTMLElement) { super(); }
 }
@@ -138,6 +145,8 @@ export class Plugin extends Component {
 	ribbon: { icon: string; title: string; fn: () => void }[] = [];
 	addRibbonIcon(icon: string, title: string, fn: () => void) { this.ribbon.push({ icon, title, fn }); return document.createElement('div'); }
 	addSettingTab(t: unknown) { this.settingTab = t; }
+	editorExtensions: Extension[] = [];
+	registerEditorExtension(e: Extension) { this.editorExtensions.push(e); }
 	async loadData() { return this.data; }
 	async saveData(d: unknown) { this.data = d; }
 }

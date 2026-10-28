@@ -1,5 +1,8 @@
 // Browser demo: runs the real plugin against the test shim, over a sample note.
-import { App, MarkdownRenderer, WorkspaceLeaf, ctx, installDomHelpers } from '../test/obsidian-shim';
+import { markdownLanguage } from '@codemirror/lang-markdown';
+import { EditorSelection, EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+import { App, MarkdownRenderer, TFile, WorkspaceLeaf, ctx, editorInfoField, editorLivePreviewField, installDomHelpers } from '../test/obsidian-shim';
 import DiceTrayPlugin, { DicePanel } from '../src/main';
 
 installDomHelpers();
@@ -118,6 +121,25 @@ async function main() {
 		if (ev.key === 'Enter') roll();
 	});
 	document.querySelector('#own-go')?.addEventListener('click', roll);
+	// Live Preview: a real CodeMirror editor with the plugin's extension, as in Obsidian's editor
+	const live = document.querySelector<HTMLElement>('#live');
+	if (live) {
+		const doc = 'Goblin arrows: `dice: 1d20 + 4` to hit, `dice: 1d6 + 2` damage.\nRoll stats once and keep them: `dice+: 4d6dl1`\nLongsword: `dice: 1d20 + str`\n';
+		new EditorView({
+			parent: live,
+			state: EditorState.create({
+				doc,
+				selection: EditorSelection.cursor(doc.length),
+				extensions: [
+					markdownLanguage,
+					EditorView.lineWrapping,
+					editorLivePreviewField.init(() => true),
+					editorInfoField.init(() => ({ file: new TFile('Game.md') })),
+					...(plugin as never as { editorExtensions: never[] }).editorExtensions,
+				],
+			}),
+		});
+	}
 	// the side panel, as it opens in Obsidian's sidebar
 	const side = document.querySelector<HTMLElement>('#panel');
 	if (side) {

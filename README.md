@@ -27,6 +27,8 @@ Or a block with one roll per line:
 ```
 ````
 
+Inline rolls show as chips in Live Preview as well as in reading view. Put the cursor on one (arrow keys, or click just after it) and its code comes back to edit; move away and it rolls. In source mode the code stays as written.
+
 There is also a command, **Roll dice**, that opens a small roller and remembers your last few rolls.
 
 ## Notation

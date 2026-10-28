@@ -1,5 +1,8 @@
 import {
 	App,
+	Component,
+	editorInfoField,
+	editorLivePreviewField,
 	ItemView,
 	MarkdownPostProcessorContext,
 	MarkdownRenderChild,
@@ -13,6 +16,8 @@ import {
 	WorkspaceLeaf,
 	setIcon,
 } from 'obsidian';
+import type { EditorView } from '@codemirror/view';
+import { liveRolls, writeOver } from './live';
 import { average, describe, DiceError, formatNumber, roll, RollResult, spelledOut } from './dice';
 import { addDie, emptyPool, FACES, poolFormula, type Edge, type Face, type Pool } from './pool';
 import { isNarrative, narrativeDetail, narrativeText, rollNarrative } from './narrative';
@@ -53,7 +58,14 @@ interface Parsed {
 
 // Where an inline roll sits in its note: its section's element, its text, and which copy of that text it is.
 // `gone` is shared by the section's rolls: copies already rewritten, so a later copy's count goes down by those before it.
-interface Place { el: HTMLElement; src: string; n: number; gone: { src: string; n: number }[] }
+interface Place {
+	el: HTMLElement;
+	src: string;
+	n: number;
+	gone: { src: string; n: number }[];
+	// Live Preview writes through the editor instead
+	write?: (to: string) => Promise<boolean>;
+}
 
 function parseBlock(src: string): Parsed | null {
 	const m = /^dice(\+|-mod|-)?:\s*(.+)$/is.exec(src.trim());
@@ -97,6 +109,7 @@ export default class DiceTrayPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 		this.registerMarkdownPostProcessor((el, ctx) => this.processInline(el, ctx));
+		this.registerEditorExtension(liveRolls((src, whole, view) => this.liveChip(src, whole, view), (s) => s.field(editorLivePreviewField, false) ?? false));
 		this.registerMarkdownCodeBlockProcessor('dice', (source, el, ctx) => {
 			// ```dice
 			// 3d6 + 2
@@ -196,6 +209,7 @@ export default class DiceTrayPlugin extends Plugin {
 
 	// Rewrites an inline roll in the note's text. False when its place can't be found (an embed, a hover, a changed note).
 	async rewrite(ctx: MarkdownPostProcessorContext, at: Place, to: string): Promise<boolean> {
+		if (at.write) return at.write(to);
 		const info = ctx.getSectionInfo(at.el);
 		const file = this.app.vault.getFileByPath(ctx.sourcePath);
 		if (!info || !file) return false;
@@ -211,6 +225,17 @@ export default class DiceTrayPlugin extends Plugin {
 			return out;
 		});
 		return done;
+	}
+
+	// A roll in Live Preview: the reading view's chip, with any result written back through the editor.
+	liveChip(src: string, whole: string, view: EditorView): HTMLElement {
+		const p = parseBlock(src);
+		if (!p) return createEl('code', { text: src });
+		const sourcePath = view.state.field(editorInfoField, false)?.file?.path ?? '';
+		const ctx = { sourcePath, addChild: (c: Component) => this.addChild(c), getSectionInfo: () => null } as unknown as MarkdownPostProcessorContext;
+		let chip: HTMLElement | null = null;
+		chip = this.renderRoll(p, ctx, { el: view.dom, src, n: 0, gone: [], write: (to) => writeOver(view, () => chip, whole, to) });
+		return chip;
 	}
 
 	renderRoll(p: Parsed, ctx: MarkdownPostProcessorContext, at?: Place): HTMLElement {
