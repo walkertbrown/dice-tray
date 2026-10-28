@@ -300,3 +300,13 @@
 	font-variant-numeric: tabular-nums;
 	color: var(--interactive-accent);
 }
+
+/* the dice thrown across the window: a sheet that clicks pass through */
+.dice-tray-throw {
+	position: fixed;
+	inset: 0;
+	width: 100vw;
+	height: 100vh;
+	pointer-events: none;
+	z-index: var(--layer-tooltip);
+}

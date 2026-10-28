@@ -22,12 +22,14 @@ import { liveRolls, writeOver } from './live';
 import { average, describe, DiceError, formatNumber, roll, RollResult, spelledOut } from './dice';
 import { addDie, emptyPool, FACES, poolFormula, type Edge, type Face, type Pool } from './pool';
 import { isNarrative, narrativeDetail, narrativeText, rollNarrative } from './narrative';
+import { thrownFor, throwDice } from './tray3d';
 import { hasTag, isLookupTable, lookupRow, NoteRoll, noteFields, parseTagRoll, TagRoll, parseLines, replaceInSection, parseList, parseNoteRoll, parseTable, pick, tableRows } from './notes';
 
 interface DiceTraySettings {
 	defaultFaces: number;
 	showFormula: boolean; // show the notation next to the result
 	animate: boolean;
+	dice3d: boolean; // throw dice across the window on a roll you make
 	rounding: 'none' | 'nearest' | 'up' | 'down';
 	history: string[]; // last expressions typed into the roll modal
 	saved: string[]; // formulas kept in the dice panel
@@ -37,12 +39,30 @@ const DEFAULT_SETTINGS: DiceTraySettings = {
 	defaultFaces: 100,
 	showFormula: false,
 	animate: true,
+	dice3d: true,
 	rounding: 'none',
 	history: [],
 	saved: [],
 };
 
 export const PANEL = 'dice-tray-panel';
+
+/** What other plugins can call, as app.plugins.getPlugin('dice-tray')?.api. */
+export interface DiceTrayApi {
+	/** Rolls dice notation. Fields like `dex` come from `sourcePath`'s note. `show` throws the dice (on the window, or
+	 *  near an element) when the reader has them on; `announce` (on unless false) tells other plugins, like a click.
+	 *  Resolves once the dice have landed. Throws DiceError on notation it can't read. */
+	roll(expression: string, opts?: { sourcePath?: string; show?: boolean | HTMLElement; announce?: boolean }): Promise<ApiRoll>;
+	/** The average of a notation, as `|avg` shows it. */
+	average(expression: string): number;
+}
+
+export interface ApiRoll {
+	expression: string;
+	total: number;
+	text: string; // the roll as it happened: "2d6 + 1 -> [2, 3] + 1 -> 6"
+	groups: RollResult['groups']; // each die, kept or dropped
+}
 
 // A `dice:` block is   dice: <expression> [|flag ...]
 // Flags understood from the Dice Roller plugin: nodice, noform, form, avg, none, text(...)
@@ -108,6 +128,17 @@ export interface RollEvent {
 
 export default class DiceTrayPlugin extends Plugin {
 	settings: DiceTraySettings = DEFAULT_SETTINGS;
+	api: DiceTrayApi = {
+		roll: async (expression, opts = {}) => {
+			const vars = await this.noteVars(expression, opts.sourcePath);
+			const r = this.doRoll(expression, vars);
+			const text = spelledOut(r, vars);
+			if (opts.announce !== false) this.announce(opts.sourcePath, expression, text);
+			if (opts.show) await this.throwRoll(r, opts.show instanceof HTMLElement ? opts.show : undefined);
+			return { expression: r.expression, total: r.total, text, groups: r.groups };
+		},
+		average: (expression) => this.round(average(expression, { defaultFaces: this.settings.defaultFaces })),
+	};
 
 	async onload() {
 		await this.loadSettings();
@@ -150,6 +181,7 @@ export default class DiceTrayPlugin extends Plugin {
 	 *  Fields like `dex` come from the note that is open. Throws DiceError on a formula it can't read. */
 	async rollTyped(expr: string, notePath: string | undefined): Promise<{ total: string; detail: string; text: string }> {
 		let out;
+		let thrown: RollResult | undefined;
 		if (isNarrative(expr)) {
 			const n = rollNarrative(expr);
 			out = { total: narrativeText(n), detail: narrativeDetail(n), text: `${expr}: ${narrativeText(n)}` };
@@ -159,10 +191,12 @@ export default class DiceTrayPlugin extends Plugin {
 			const text = spelledOut(r, vars);
 			// the roll as it happened, modifiers and all ("2d6 + 1 -> [2, 3] + 1 -> 6")
 			out = { total: formatNumber(r.total), detail: text, text };
+			thrown = r;
 		}
 		this.announce(notePath, expr, out.text);
 		this.settings.history = [expr, ...this.settings.history.filter((h) => h !== expr)].slice(0, 8);
 		await this.saveSettings();
+		if (thrown) await this.throwRoll(thrown);
 		return out;
 	}
 
@@ -179,6 +213,19 @@ export default class DiceTrayPlugin extends Plugin {
 		const r = roll(expression, { defaultFaces: this.settings.defaultFaces, vars });
 		r.total = this.round(r.total);
 		return r;
+	}
+
+	/** Throws the roll's dice near `near` (or mid-window) and resolves when they land; at once when the reader has them
+	 *  off, asks for less motion, or the roll has no dice that are solids. */
+	throwRoll(r: RollResult, near?: HTMLElement): Promise<void> {
+		if (!this.throws(r)) return Promise.resolve();
+		const doc = near?.doc ?? activeDocument;
+		return throwDice(doc, thrownFor(r), near?.getBoundingClientRect());
+	}
+
+	/** Whether a roll you make would be thrown. */
+	private throws(r: RollResult) {
+		return this.settings.dice3d && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches && thrownFor(r).length > 0;
 	}
 
 	announce(sourcePath: string | undefined, expression: string, text: string) {
@@ -308,7 +355,13 @@ export default class DiceTrayPlugin extends Plugin {
 				const src = `dice+: ${p.expression} -> ${line.slice(line.indexOf(' -> ') + 4)}`;
 				if (await this.rewrite(ctx, at, '`' + src + '`')) at.src = src;
 			}
-			if (this.settings.animate && !p.flags.has('none')) this.tumble(chip, total, () => showResult(r));
+			if (clicked && !p.flags.has('none') && this.throws(r)) {
+				// the number waits for the dice
+				chip.addClass('dice-tray-rolling');
+				await this.throwRoll(r, chip);
+				chip.removeClass('dice-tray-rolling');
+				showResult(r);
+			} else if (this.settings.animate && !p.flags.has('none')) this.tumble(chip, total, () => showResult(r));
 			else showResult(r);
 		};
 
@@ -781,6 +834,11 @@ class DiceTraySettingTab extends PluginSettingTab {
 				name: 'Animate rolls',
 				desc: 'Tumble the number briefly when a roll happens.',
 				control: { type: 'toggle', key: 'animate', defaultValue: true },
+			},
+			{
+				name: 'Throw dice',
+				desc: 'When you click a roll, or roll from the panel or the roll window, dice tumble across the window and land on what came up. Never when your system asks for less motion.',
+				control: { type: 'toggle', key: 'dice3d', defaultValue: true },
 			},
 			{
 				name: 'Round results',

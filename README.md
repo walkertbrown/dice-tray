@@ -56,6 +56,12 @@ Flags go after a `|`: `` `dice: 3d6|avg` `` shows the average, `|noform` hides t
 
 A lone d20 glows green on a natural 20 and red on a natural 1.
 
+## Dice you can watch
+
+Click a roll, or roll from the panel or the roll window, and the dice tumble across the window and land on what came up: d4, d6, d8, d10, d12 and d20 as solids, d100 as a tens and a ones d10, Fate dice as d6s marked − and +. Dice that were dropped (the low die of advantage, say) land dimmed. They are drawn in the theme's accent colour, and clicks pass straight through them.
+
+The rolls a note makes as it opens never throw dice, and neither does a roll of more than 20 dice. Turn them off with **Throw dice** in the settings; they are off anyway when your system asks for less motion.
+
 ## Narrative dice
 
 Letters name Genesys and Star Wars dice, each with an optional count: `g` or `a` ability, `y` proficiency, `d` difficulty, `r` or `c` challenge, `b` boost, `s` or `k` setback, `w` or `f` force. `p` is difficulty, or proficiency when the pool uses `a`, `c` or `d`. The chip shows the net result (`2 successes, 1 threat, 1 triumph`), and hovering lists each die.
@@ -129,6 +135,26 @@ For rolls that aren't written in a note. Click the dice icon in the ribbon (or r
 - **This session** lists every roll from the panel; click one to roll it again.
 
 Panel rolls go into your session log like any other.
+
+## For other plugins
+
+Dice Tray has a small API, so another plugin can roll with the same notation and show the same dice:
+
+```ts
+const tray = app.plugins.getPlugin('dice-tray')?.api;
+if (tray) {
+	const r = await tray.roll('2d20kh1 + dex', { sourcePath: file.path, show: true });
+	r.total; // 17
+	r.text; // "2d20kh1 + dex -> [14] + 3 -> 17"
+	r.groups; // each group of dice: its notation, and each die's value and whether it was kept (the 9 that was dropped)
+	tray.average('8d6'); // 28
+}
+```
+
+- `sourcePath` is the note whose fields (`dex:: 3`) the roll may use.
+- `show: true` throws the dice mid-window, or pass an element to throw them beside it. It follows the reader's **Throw dice** setting, and the promise resolves once they have landed.
+- `announce: false` keeps the roll out of the session log; by default it goes in like a click.
+- A formula it can't read rejects with an error that says why.
 
 ## Privacy
 

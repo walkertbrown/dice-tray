@@ -252,7 +252,7 @@ describe('Dice Tray in a (fake) note', () => {
 
 	it('exposes searchable settings and persists a change', async () => {
 		const tab = (plugin as never as { settingTab: { getSettingDefinitions(): { name: string }[]; setControlValue(k: string, v: unknown): Promise<void>; getControlValue(k: string): unknown } }).settingTab;
-		expect(tab.getSettingDefinitions().map((d) => d.name)).toEqual(['Default die', 'Show the formula', 'Animate rolls', 'Round results']);
+		expect(tab.getSettingDefinitions().map((d) => d.name)).toEqual(['Default die', 'Show the formula', 'Animate rolls', 'Throw dice', 'Round results']);
 		await tab.setControlValue('defaultFaces', 8);
 		expect(tab.getControlValue('defaultFaces')).toBe(8);
 		expect(plugin.doRoll('1d').groups[0]!.faces).toBe('8');
@@ -327,5 +327,32 @@ describe('the dice panel', () => {
 		await tick();
 		await tick();
 		expect(Notice.last).not.toBe('');
+	});
+});
+
+describe('the roll API other plugins call', () => {
+	it('rolls, gives back each die, and tells the others', async () => {
+		const { app, plugin } = await load();
+		const r = await plugin.api.roll('2d1 + 3', { sourcePath: 'Game.md' });
+		expect(r.total).toBe(5);
+		expect(r.text).toBe('2d1 + 3 -> [1, 1] + 3 -> 5');
+		expect(r.groups[0]!.dice.map((d) => d.value)).toEqual([1, 1]);
+		expect(app.events.at(-1)).toEqual({ name: 'dice-tray:roll', data: { sourcePath: 'Game.md', expression: '2d1 + 3', text: r.text } });
+	});
+
+	it('keeps quiet when asked, and still lands with nothing to draw on', async () => {
+		const { app, plugin } = await load();
+		const before = app.events.length;
+		const r = await plugin.api.roll('1d20', { announce: false, show: true });
+		expect(r.total).toBeGreaterThanOrEqual(1);
+		expect(app.events.length).toBe(before);
+		expect(document.querySelector('.dice-tray-throw')).toBeNull();
+	});
+
+	it('averages and refuses notation it cannot read', async () => {
+		const { plugin } = await load();
+		expect(plugin.api.average('2d6 + 1')).toBe(8);
+		await expect(plugin.api.roll('2d')).resolves.toBeDefined();
+		await expect(plugin.api.roll('2 +')).rejects.toThrow();
 	});
 });
