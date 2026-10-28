@@ -47,9 +47,35 @@ Flags go after a `|`: `` `dice: 3d6|avg` `` shows the average, `|noform` hides t
 
 A lone d20 glows green on a natural 20 and red on a natural 1.
 
+## Rolling on notes
+
+Point a roll at a note and it picks from what is inside:
+
+| Write | Picks |
+| --- | --- |
+| `` `dice: [[Encounters]]` `` | a random section (paragraph, list, table…) of that note |
+| `` `dice: 3d[[Encounters]]` `` | three different sections |
+| `` `dice: [[Encounters#Forest]]` `` | a section under that heading |
+| `` `dice: [[Loot^gems]]` `` | a random row of the table (or item of the list) with block id `^gems` |
+| `` `dice: [[Loot^gems]]\|Item` `` | just the `Item` column of that row |
+| `` `dice: [[Rumours]]\|line` `` | a random line |
+
+A table whose first column holds dice ranges is a lookup table: name the dice in its header and the roll lands on the matching row.
+
+```
+| d20  | Weather        |
+| ---- | -------------- |
+| 1-5  | Rain           |
+| 6-15 | Clear          |
+| 16-20 | Fog           |
+^weather
+```
+
+`` `dice: [[Tables^weather]]` `` rolls a d20 and shows that row. Results render as markdown; add `|norender` for plain text.
+
 ## Not yet
 
-Rolling from a note's sections, tags, tables and lookup tables (`dice: [[Note]]`, `dice: #tag`) is not in this release. If you use those, keep Dice Roller installed for now; the two plugins can run side by side.
+Rolling a random note by tag (`dice: #tag`), `dice-mod:` writing results into the note, and the Dice View side panel are not in this release. If you use those, keep Dice Roller installed for now; the two plugins can run side by side.
 
 ## Privacy
 
@@ -60,6 +86,10 @@ Dice Tray does not use the network, has no accounts, collects nothing and sends 
 From Obsidian: Settings → Community plugins → Browse → search "Dice Tray".
 
 By hand: copy `main.js`, `manifest.json` and `styles.css` from the latest release into `<your vault>/.obsidian/plugins/dice-tray/`, then enable it under Community plugins.
+
+## Source
+
+https://github.com/walkertbrown/dice-tray
 
 ## Build
 

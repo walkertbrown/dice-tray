@@ -126,7 +126,7 @@ function parseDice(s: string, start: number, opts: RollOptions): [Tok, number] {
 		if ((mm = /^(kh|kl|k)(\d*)/.exec(rest))) {
 			spec.keep = { high: mm[1] !== 'kl', n: mm[2] ? Number(mm[2]) : 1 };
 			i += mm[0].length;
-		} else if ((mm = /^(dh|dl|d)(\d*)(?![dD\d%fF\[])/.exec(rest)) && !/^d\d*[dD]/.test(rest)) {
+		} else if ((mm = /^(dh|dl|d)(\d*)(?![dD\d%fF[])/.exec(rest)) && !/^d\d*[dD]/.test(rest)) {
 			spec.drop = { high: mm[1] === 'dh', n: mm[2] ? Number(mm[2]) : 1 };
 			i += mm[0].length;
 		} else if ((mm = /^(!!|!i|!)(\d*)/.exec(rest))) {
@@ -392,7 +392,7 @@ export function average(expression: string, opts: RollOptions = {}): number {
 			let n = s.count;
 			if (s.keep) n = Math.min(n, s.keep.n);
 			if (s.drop) n = Math.max(0, n - s.drop.n);
-			return { t: 'num', v: mean * n, raw: t.raw } as Tok;
+			return { t: 'num', v: mean * n, raw: t.raw };
 		}),
 		rngAvg,
 	);

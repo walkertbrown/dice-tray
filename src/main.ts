@@ -1,5 +1,18 @@
-import { App, MarkdownPostProcessorContext, Modal, Notice, Plugin, PluginSettingTab, Setting, setIcon } from 'obsidian';
+import {
+	App,
+	MarkdownPostProcessorContext,
+	MarkdownRenderChild,
+	MarkdownRenderer,
+	Modal,
+	Notice,
+	Plugin,
+	PluginSettingTab,
+	SettingDefinitionItem,
+	TFile,
+	setIcon,
+} from 'obsidian';
 import { average, describe, DiceError, formatNumber, roll, RollResult } from './dice';
+import { isLookupTable, lookupRow, NoteRoll, parseLines, parseList, parseNoteRoll, parseTable, pick, tableRows } from './notes';
 
 interface DiceTraySettings {
 	defaultFaces: number;
@@ -23,21 +36,24 @@ interface Parsed {
 	expression: string;
 	flags: Set<string>;
 	text?: string;
+	note?: NoteRoll;
 }
 
 function parseBlock(src: string): Parsed | null {
 	const m = /^dice(?:\+|-|-mod)?:\s*(.+)$/is.exec(src.trim());
 	if (!m) return null;
-	const parts = (m[1] as string).split('|').map((s) => s.trim());
-	const expression = parts.shift() ?? '';
+	const body = m[1] as string;
+	const note = parseNoteRoll(body);
+	const parts = body.split('|').map((s) => s.trim());
+	const expression = note ? body : (parts.shift() ?? '');
 	const flags = new Set<string>();
 	let text: string | undefined;
-	for (const p of parts) {
+	for (const p of note ? parts.slice(1) : parts) {
 		const t = /^text\((.*)\)$/s.exec(p);
 		if (t) text = t[1];
 		else flags.add(p.toLowerCase());
 	}
-	return { expression, flags, text };
+	return { expression, flags, text, note: note ?? undefined };
 }
 
 export default class DiceTrayPlugin extends Plugin {
@@ -46,14 +62,14 @@ export default class DiceTrayPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 		this.registerMarkdownPostProcessor((el, ctx) => this.processInline(el, ctx));
-		this.registerMarkdownCodeBlockProcessor('dice', (source, el) => {
+		this.registerMarkdownCodeBlockProcessor('dice', (source, el, ctx) => {
 			// ```dice
 			// 3d6 + 2
 			// ```  -> one roll per non-empty line
 			for (const line of source.split('\n')) {
 				if (!line.trim()) continue;
 				const p = parseBlock(line.startsWith('dice') ? line : `dice: ${line}`);
-				if (p) el.appendChild(this.renderRoll(p));
+				if (p) el.appendChild(this.renderRoll(p, ctx));
 			}
 		});
 		this.addCommand({
@@ -79,17 +95,18 @@ export default class DiceTrayPlugin extends Plugin {
 		return r;
 	}
 
-	private processInline(el: HTMLElement, _ctx: MarkdownPostProcessorContext) {
+	private processInline(el: HTMLElement, ctx: MarkdownPostProcessorContext) {
 		const codes = el.querySelectorAll('code');
 		for (const code of Array.from(codes)) {
 			if (code.closest('pre')) continue;
 			const p = parseBlock(code.textContent ?? '');
 			if (!p) continue;
-			code.replaceWith(this.renderRoll(p));
+			code.replaceWith(this.renderRoll(p, ctx));
 		}
 	}
 
-	renderRoll(p: Parsed): HTMLElement {
+	renderRoll(p: Parsed, ctx: MarkdownPostProcessorContext): HTMLElement {
+		if (p.note) return this.renderNoteRoll(p, p.note, ctx);
 		const chip = createSpan({ cls: 'dice-tray' });
 		if (p.flags.has('avg')) {
 			try {
@@ -152,6 +169,112 @@ export default class DiceTrayPlugin extends Plugin {
 		return chip;
 	}
 
+	// `dice: [[Note]]`, `dice: 2d[[Note^table]]|Column`: pick from a note.
+	private renderNoteRoll(p: Parsed, n: NoteRoll, ctx: MarkdownPostProcessorContext): HTMLElement {
+		const sourcePath = ctx.sourcePath;
+		const wrap = createSpan({ cls: 'dice-tray dice-tray-note' });
+		// a render child scoped to this element, so rendered markdown is cleaned up with it
+		const child = new MarkdownRenderChild(wrap);
+		ctx.addChild(child);
+		const icon = wrap.createSpan({ cls: 'dice-tray-icon' });
+		setIcon(icon, 'dices');
+		if (p.flags.has('nodice')) icon.hide();
+		const out = wrap.createSpan({ cls: 'dice-tray-note-out' });
+		wrap.setAttr('role', 'button');
+		wrap.setAttr('aria-label', `Roll on ${n.link}`);
+
+		const go = async () => {
+			try {
+				const picks = await this.rollNote(n, sourcePath);
+				out.empty();
+				wrap.removeClass('dice-tray-error');
+				for (const text of picks) {
+					const item = out.createSpan({ cls: 'dice-tray-note-item' });
+					if (p.flags.has('norender')) item.setText(text);
+					else await MarkdownRenderer.render(this.app, text, item, sourcePath, child);
+				}
+				wrap.title = `${n.count > 1 ? n.count + ' from ' : ''}${n.link}${n.block ? '^' + n.block : ''}`;
+			} catch (e) {
+				this.renderError(wrap, e);
+			}
+		};
+		wrap.addEventListener('click', (ev) => {
+			// let links inside the result work
+			if ((ev.target as HTMLElement).closest('a')) return;
+			ev.preventDefault();
+			void go();
+		});
+		void go();
+		return wrap;
+	}
+
+	private async rollNote(n: NoteRoll, sourcePath: string): Promise<string[]> {
+		const file = this.app.metadataCache.getFirstLinkpathDest(n.link, sourcePath);
+		if (!(file instanceof TFile)) throw new DiceError(`No note "${n.link}"`);
+		const cache = this.app.metadataCache.getFileCache(file);
+		const content = await this.app.vault.cachedRead(file);
+		const slice = (from: number, to: number) => content.slice(from, to);
+
+		let text = content;
+		// narrow to a block or a heading's section
+		if (n.block) {
+			const b = cache?.blocks?.[n.block];
+			if (!b) throw new DiceError(`No block ^${n.block} in "${n.link}"`);
+			text = slice(b.position.start.offset, b.position.end.offset);
+		} else if (n.heading) {
+			const hs = cache?.headings ?? [];
+			const i = hs.findIndex((h) => h.heading.toLowerCase() === n.heading!.toLowerCase());
+			if (i < 0) throw new DiceError(`No heading "${n.heading}" in "${n.link}"`);
+			const start = hs[i]!.position.end.offset;
+			const next = hs.slice(i + 1).find((h) => h.level <= hs[i]!.level);
+			text = slice(start, next ? next.position.start.offset : content.length);
+		} else if (cache?.frontmatterPosition) {
+			text = slice(cache.frontmatterPosition.end.offset, content.length);
+		}
+
+		const table = n.mode === 'auto' || n.mode === 'table' ? parseTable(text) : null;
+		let pool: string[];
+		if (table) {
+			if (isLookupTable(table) && !n.column) {
+				// header names the dice, e.g. "d20" or "2d6"
+				const head = table.headers[0] ?? '';
+				const expr = /\d*d\d+/i.test(head) ? head : `1d${table.rows.length}`;
+				const picks: string[] = [];
+				for (let i = 0; i < n.count; i++) {
+					const r = this.doRoll(expr);
+					const row = lookupRow(table, r.total);
+					picks.push(row === null ? `${r.total}: no row` : `**${r.total}** ${row}`);
+				}
+				return picks;
+			}
+			pool = tableRows(table, n.column);
+		} else if (n.mode === 'line') {
+			pool = parseLines(text);
+		} else if (n.mode === 'list' || (n.mode === 'auto' && parseList(text))) {
+			pool = parseList(text) ?? [];
+		} else if (n.mode === 'section' && !n.block) {
+			// whole sections of the note, by the metadata cache
+			const secs = (cache?.sections ?? []).filter(
+				(s) => s.type !== 'heading' && s.type !== 'yaml' && s.type !== 'thematicBreak' &&
+					s.position.start.offset >= content.length - text.length - 1,
+			);
+			pool = secs.map((s) => slice(s.position.start.offset, s.position.end.offset).trim()).filter(Boolean);
+			if (n.heading) pool = pool.filter((s) => text.includes(s));
+		} else {
+			pool = parseLines(text);
+		}
+		if (!pool.length) throw new DiceError(`Nothing to roll on in "${n.link}"`);
+		const picks: string[] = [];
+		const left = [...pool];
+		for (let i = 0; i < n.count; i++) {
+			const src = left.length ? left : pool;
+			const v = pick(src);
+			left.splice(left.indexOf(v), 1);
+			picks.push(v);
+		}
+		return picks;
+	}
+
 	// Brief number tumble before the real result lands.
 	private tumble(chip: HTMLElement, total: HTMLElement, done: () => void) {
 		chip.addClass('dice-tray-rolling');
@@ -193,13 +316,14 @@ export default class DiceTrayPlugin extends Plugin {
 	private renderError(chip: HTMLElement, e: unknown) {
 		chip.empty();
 		chip.addClass('dice-tray-error');
-		const msg = e instanceof DiceError ? e.message : 'Could not roll';
+		const msg = e instanceof Error ? e.message : 'Could not roll';
 		chip.setText(msg);
 		chip.title = msg;
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const saved = (await this.loadData()) as Partial<DiceTraySettings> | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, saved ?? {});
 	}
 	async saveSettings() {
 		await this.saveData(this.settings);
@@ -213,7 +337,7 @@ class RollModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		contentEl.addClass('dice-tray-modal');
-		contentEl.createEl('h3', { text: 'Roll dice' });
+		this.setTitle('Roll dice');
 		const input = contentEl.createEl('input', { type: 'text', placeholder: '2d20kh1 + 5' });
 		input.addClass('dice-tray-input');
 		const out = contentEl.createDiv({ cls: 'dice-tray-modal-out' });
@@ -222,7 +346,7 @@ class RollModal extends Modal {
 			recent.empty();
 			for (const h of this.plugin.settings.history) {
 				const b = recent.createEl('button', { text: h });
-				b.onclick = () => { input.value = h; go(); };
+				b.onclick = () => { input.value = h; void go(); };
 			}
 		};
 		const go = async () => {
@@ -256,50 +380,40 @@ class DiceTraySettingTab extends PluginSettingTab {
 	constructor(app: App, private plugin: DiceTrayPlugin) {
 		super(app, plugin);
 	}
-	display() {
-		const { containerEl } = this;
-		containerEl.empty();
-		new Setting(containerEl)
-			.setName('Default die')
-			.setDesc('Faces used when a roll says "d" with no number, like "3d".')
-			.addText((t) =>
-				t.setValue(String(this.plugin.settings.defaultFaces)).onChange(async (v) => {
-					const n = Number(v);
-					if (Number.isInteger(n) && n > 0) {
-						this.plugin.settings.defaultFaces = n;
-						await this.plugin.saveSettings();
-					}
-				}),
-			);
-		new Setting(containerEl)
-			.setName('Show the formula')
-			.setDesc('Show the dice notation next to each result.')
-			.addToggle((t) =>
-				t.setValue(this.plugin.settings.showFormula).onChange(async (v) => {
-					this.plugin.settings.showFormula = v;
-					await this.plugin.saveSettings();
-				}),
-			);
-		new Setting(containerEl)
-			.setName('Animate rolls')
-			.setDesc('Tumble the number briefly when a roll happens.')
-			.addToggle((t) =>
-				t.setValue(this.plugin.settings.animate).onChange(async (v) => {
-					this.plugin.settings.animate = v;
-					await this.plugin.saveSettings();
-				}),
-			);
-		new Setting(containerEl)
-			.setName('Round results')
-			.setDesc('How to round results that are not whole numbers.')
-			.addDropdown((d) =>
-				d
-					.addOptions({ none: 'Do not round', nearest: 'Nearest', up: 'Up', down: 'Down' })
-					.setValue(this.plugin.settings.rounding)
-					.onChange(async (v) => {
-						this.plugin.settings.rounding = v as DiceTraySettings['rounding'];
-						await this.plugin.saveSettings();
-					}),
-			);
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return [
+			{
+				name: 'Default die',
+				desc: 'Faces used when a roll says "d" with no number, like "3d".',
+				control: { type: 'number', key: 'defaultFaces', min: 1, step: 1, defaultValue: 100 },
+			},
+			{
+				name: 'Show the formula',
+				desc: 'Show the dice notation next to each result.',
+				control: { type: 'toggle', key: 'showFormula', defaultValue: false },
+			},
+			{
+				name: 'Animate rolls',
+				desc: 'Tumble the number briefly when a roll happens.',
+				control: { type: 'toggle', key: 'animate', defaultValue: true },
+			},
+			{
+				name: 'Round results',
+				desc: 'How to round results that are not whole numbers.',
+				control: {
+					type: 'dropdown',
+					key: 'rounding',
+					options: { none: 'Do not round', nearest: 'Nearest', up: 'Up', down: 'Down' },
+					defaultValue: 'none',
+				},
+			},
+		];
+	}
+	getControlValue(key: string): unknown {
+		return this.plugin.settings[key as keyof DiceTraySettings];
+	}
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		(this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+		await this.plugin.saveSettings();
 	}
 }

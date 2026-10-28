@@ -187,3 +187,27 @@
 	font-family: var(--font-monospace);
 	font-size: 0.85em;
 }
+
+/* note rolls: results are rendered markdown, so loosen the chip */
+.dice-tray-note {
+	border-radius: var(--radius-m, 8px);
+	font-family: inherit;
+	padding: 0.1em 0.6em 0.1em 0.45em;
+	white-space: normal;
+	align-items: flex-start;
+}
+.dice-tray-note .dice-tray-icon {
+	margin-top: 0.35em;
+}
+.dice-tray-note-out {
+	display: inline-flex;
+	flex-direction: column;
+	gap: 0.15em;
+}
+.dice-tray-note-item p {
+	margin: 0;
+}
+.dice-tray-note-item + .dice-tray-note-item {
+	border-top: 1px dashed var(--background-modifier-border);
+	padding-top: 0.15em;
+}
