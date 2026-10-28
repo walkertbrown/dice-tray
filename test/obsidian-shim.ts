@@ -24,6 +24,8 @@ export function installDomHelpers() {
 	P.removeClass = function (this: HTMLElement, ...c: string[]) { this.classList.remove(...c); };
 	P.hide = function (this: HTMLElement) { this.style.display = 'none'; };
 	P.show = function (this: HTMLElement) { this.style.display = ''; };
+	P.setCssProps = function (this: HTMLElement, props: Record<string, string>) { for (const [k, v] of Object.entries(props)) this.style.setProperty(k, v); };
+	Object.defineProperty(P, 'doc', { get(this: HTMLElement) { return this.ownerDocument; }, configurable: true });
 	P.setAttr = function (this: HTMLElement, k: string, v: string) { this.setAttribute(k, v); };
 	(globalThis as unknown as Record<string, unknown>).createSpan = (o?: Opts) => make.call(undefined, 'span', o);
 	(globalThis as unknown as Record<string, unknown>).createDiv = (o?: Opts) => make.call(undefined, 'div', o);

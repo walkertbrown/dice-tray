@@ -245,6 +245,7 @@ export default class DiceTrayPlugin extends Plugin {
 		chip.setAttr('aria-label', `Roll ${p.expression}`);
 		chip.addEventListener('click', (ev) => {
 			ev.preventDefault();
+			this.peek(chip);
 			void go(true);
 		});
 		if (p.mode === 'save' && p.saved !== undefined) {
@@ -271,6 +272,8 @@ export default class DiceTrayPlugin extends Plugin {
 				chip.removeClass('dice-tray-error');
 				total.setText(p.text ?? narrativeText(r));
 				chip.title = `${p.expression}: ${narrativeDetail(r)}`;
+				chip.querySelector('.dice-tray-card')?.remove();
+				this.fit(chip.createDiv({ cls: 'dice-tray-card', text: narrativeDetail(r) }));
 				if (clicked) this.announce(sourcePath, p.expression, `${p.expression}: ${narrativeText(r)}`);
 			} catch (e) {
 				this.renderError(chip, e);
@@ -280,6 +283,7 @@ export default class DiceTrayPlugin extends Plugin {
 		chip.setAttr('aria-label', `Roll ${p.expression}`);
 		chip.addEventListener('click', (ev) => {
 			ev.preventDefault();
+			this.peek(chip);
 			go(true);
 		});
 		go();
@@ -415,6 +419,28 @@ export default class DiceTrayPlugin extends Plugin {
 		}, 45);
 	}
 
+	// A phone has no hover, so a tap that rolls also opens the dice for a few seconds.
+	private peek(chip: HTMLElement) {
+		if (!window.matchMedia?.('(hover: none)').matches) return;
+		chip.doc.querySelectorAll('.dice-tray-peek').forEach((o) => o !== chip && o.removeClass('dice-tray-peek'));
+		chip.addClass('dice-tray-peek');
+		const card = chip.querySelector<HTMLElement>('.dice-tray-card');
+		if (card) this.fit(card);
+		window.clearTimeout(this.peeks.get(chip));
+		this.peeks.set(chip, window.setTimeout(() => chip.removeClass('dice-tray-peek'), 4000));
+	}
+	private peeks = new WeakMap<HTMLElement, number>();
+
+	// an open card that would run off the right of the screen moves left. A phone
+	// widens the page to fit the card, so the screen's own width is the edge.
+	private fit(card: HTMLElement) {
+		if (!card.parentElement?.classList.contains('dice-tray-peek')) return;
+		card.setCssProps({ '--dice-tray-shift': '0px' });
+		const edge = Math.min(window.innerWidth, window.screen?.width || Infinity) - 8;
+		const over = card.getBoundingClientRect().right - edge;
+		if (over > 0) card.setCssProps({ '--dice-tray-shift': `${-over}px` });
+	}
+
 	// The individual dice, shown as little tiles under the hover card.
 	private renderPips(chip: HTMLElement, r: RollResult) {
 		chip.querySelector('.dice-tray-card')?.remove();
@@ -440,6 +466,7 @@ export default class DiceTrayPlugin extends Plugin {
 		if (r.groups.length !== 1 || r.groups[0]!.dice.length > 1 || /[+\-*/^]/.test(r.expression.slice(1))) {
 			card.createDiv({ cls: 'dice-tray-card-total', text: `${r.expression} = ${formatNumber(r.total)}` });
 		}
+		this.fit(card);
 	}
 
 	private renderError(chip: HTMLElement, e: unknown) {

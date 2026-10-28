@@ -88,11 +88,11 @@
 .dice-tray-card {
 	display: none;
 	position: absolute;
-	left: 0;
+	left: var(--dice-tray-shift, 0);
 	top: calc(100% + 6px);
 	z-index: 50;
 	min-width: 12em;
-	max-width: 28em;
+	max-width: min(28em, calc(100vw - 16px));
 	padding: 0.5em 0.65em;
 	border-radius: var(--radius-m, 8px);
 	background: var(--background-primary);
@@ -104,8 +104,12 @@
 	cursor: default;
 }
 .dice-tray:hover .dice-tray-card,
-.dice-tray:focus-within .dice-tray-card {
+.dice-tray:focus-within .dice-tray-card,
+.dice-tray-peek .dice-tray-card {
 	display: block;
+}
+.dice-tray-narrative .dice-tray-card {
+	white-space: normal;
 }
 .dice-tray-row {
 	display: flex;

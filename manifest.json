@@ -1,7 +1,7 @@
 {
 	"id": "dice-tray",
 	"name": "Dice Tray",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"minAppVersion": "1.13.0",
 	"description": "Roll dice, random tables, lists and note sections inline, reading the same dice: syntax as Dice Roller so existing notes keep working.",
 	"author": "Bananafest Destiny",

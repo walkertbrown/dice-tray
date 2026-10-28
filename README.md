@@ -1,6 +1,6 @@
 # Dice Tray
 
-Roll dice inside your notes. Write `` `dice: 2d20kh1 + 5` `` and the note shows the result as a small chip you can click to roll again. Hover it to see every die.
+Roll dice inside your notes. Write `` `dice: 2d20kh1 + 5` `` and the note shows the result as a small chip you can click to roll again. Hover it to see every die, or on a phone, tap it: the dice show for a few seconds.
 
 It reads the same notation as the Dice Roller plugin's `dice:` blocks, so notes written for that plugin keep working here.
 

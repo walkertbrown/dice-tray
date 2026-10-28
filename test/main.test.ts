@@ -95,6 +95,30 @@ describe('Dice Tray in a (fake) note', () => {
 		expect(labelled!.querySelector('.dice-tray-total')!.textContent).toBe('Roll me');
 	});
 
+	it('opens the dice on a tap when the screen has no hover, and closes them after', () => {
+		vi.useFakeTimers();
+		const was = window.matchMedia;
+		window.matchMedia = ((q: string) => ({ matches: q === '(hover: none)' })) as never;
+		try {
+			const el = render(plugin, '<p><code>dice: 3d6</code> <code>dice: 2g1p</code></p>');
+			const [chip, pool] = Array.from(el.querySelectorAll<HTMLElement>('.dice-tray'));
+			expect(chip!.classList.contains('dice-tray-peek')).toBe(false);
+			chip!.click();
+			expect(chip!.classList.contains('dice-tray-peek')).toBe(true);
+			document.body.append(el);
+			pool!.click();
+			expect(chip!.classList.contains('dice-tray-peek')).toBe(false); // one open at a time
+			expect(pool!.querySelector('.dice-tray-card')!.textContent).toMatch(/^ability: /);
+			chip!.click();
+			vi.advanceTimersByTime(4100);
+			expect(chip!.classList.contains('dice-tray-peek')).toBe(false);
+		} finally {
+			document.body.replaceChildren();
+			window.matchMedia = was;
+			vi.useRealTimers();
+		}
+	});
+
 	it('leaves code that is not a roll alone and shows errors inline', () => {
 		const el = render(plugin, '<p><code>npm test</code> <code>dice: 1d0</code></p>');
 		expect(el.querySelectorAll('code')).toHaveLength(1);
