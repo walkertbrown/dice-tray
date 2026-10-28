@@ -65,6 +65,10 @@ suite('spelledOut', () => {
 		const r = roll('3d100 + 12', { rng: faces([74, 19, 74], [100, 100, 100]) });
 		expect(spelledOut(r)).toBe('3d100 + 12 -> [75, 20, 75] + 12 -> 182');
 	});
+	it('writes fields from the note as their numbers', () => {
+		const r = roll('1d20 + DEX', { rng: faces([16], [20]), vars: { dex: 3 } });
+		expect(spelledOut(r, { dex: 3 })).toBe('1d20 + DEX -> [17] + 3 -> 20');
+	});
 	it('skips the middle when there are no dice', () => {
 		expect(spelledOut(roll('2 + 3'))).toBe('2 + 3 -> 5');
 	});

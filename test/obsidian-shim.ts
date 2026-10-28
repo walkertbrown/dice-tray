@@ -85,7 +85,11 @@ function cacheFor(content: string) {
 
 export class App {
 	notes = new Map<string, FakeNote>();
-	workspace = { getActiveFile: (): TFile | null => null };
+	events: { name: string; data: unknown }[] = [];
+	workspace = {
+		getActiveFile: (): TFile | null => null,
+		trigger: (name: string, data: unknown) => { this.events.push({ name, data }); },
+	};
 	metadataCache = {
 		getFirstLinkpathDest: (link: string): TFile | null => {
 			const n = this.notes.get(link) ?? this.notes.get(link + '.md');

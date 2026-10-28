@@ -11,7 +11,7 @@ import {
 	TFile,
 	setIcon,
 } from 'obsidian';
-import { average, describe, DiceError, formatNumber, roll, RollResult } from './dice';
+import { average, describe, DiceError, formatNumber, roll, RollResult, spelledOut } from './dice';
 import { isNarrative, narrativeDetail, narrativeText, rollNarrative } from './narrative';
 import { isLookupTable, lookupRow, NoteRoll, noteFields, parseLines, parseList, parseNoteRoll, parseTable, pick, tableRows } from './notes';
 
@@ -62,6 +62,14 @@ function hasField(expression: string): boolean {
 	return /(^|[^\dA-Za-z])(?![dD](\d|%|[fFS]\b|\[|\b))[A-Za-z_]/.test(expression);
 }
 
+// A roll someone made on purpose (a click, or the roll modal), not the roll a note makes as it opens.
+// Other plugins can listen with app.workspace.on('dice-tray:roll', (e) => ...); Session Log writes it into the log.
+export interface RollEvent {
+	sourcePath: string; // the note the roll is in, or the open note for the modal; '' if none
+	expression: string;
+	text: string; // the roll written out: "1d20 + 5 -> [17] + 5 -> 22", "2g1p: 1 success", "[[Weather]]: Rain"
+}
+
 export default class DiceTrayPlugin extends Plugin {
 	settings: DiceTraySettings = DEFAULT_SETTINGS;
 
@@ -101,6 +109,11 @@ export default class DiceTrayPlugin extends Plugin {
 		return r;
 	}
 
+	announce(sourcePath: string | undefined, expression: string, text: string) {
+		const ev: RollEvent = { sourcePath: sourcePath ?? '', expression, text };
+		this.app.workspace.trigger('dice-tray:roll', ev);
+	}
+
 	// Numbers named in the note, read only when the formula has a word in it besides dice
 	async noteVars(expression: string, path: string | undefined): Promise<Record<string, number> | undefined> {
 		if (!path || !hasField(expression)) return undefined;
@@ -122,7 +135,7 @@ export default class DiceTrayPlugin extends Plugin {
 
 	renderRoll(p: Parsed, ctx: MarkdownPostProcessorContext): HTMLElement {
 		if (p.note) return this.renderNoteRoll(p, p.note, ctx);
-		if (isNarrative(p.expression)) return this.renderNarrative(p);
+		if (isNarrative(p.expression)) return this.renderNarrative(p, ctx.sourcePath);
 		const chip = createSpan({ cls: 'dice-tray' });
 		if (p.flags.has('avg')) {
 			try {
@@ -165,16 +178,18 @@ export default class DiceTrayPlugin extends Plugin {
 			this.renderPips(chip, r);
 		};
 
-		const go = async () => {
+		const go = async (clicked = false) => {
 			let r: RollResult;
+			let vars: Record<string, number> | undefined;
 			try {
 				// most rolls name no field, and those land at once, without waiting on the note
-				const vars = hasField(p.expression) ? await this.noteVars(p.expression, ctx.sourcePath) : undefined;
+				vars = hasField(p.expression) ? await this.noteVars(p.expression, ctx.sourcePath) : undefined;
 				r = this.doRoll(p.expression, vars);
 			} catch (e) {
 				this.renderError(chip, e);
 				return;
 			}
+			if (clicked) this.announce(ctx.sourcePath, p.expression, spelledOut(r, vars));
 			if (this.settings.animate && !p.flags.has('none')) this.tumble(chip, total, () => showResult(r));
 			else showResult(r);
 		};
@@ -183,25 +198,26 @@ export default class DiceTrayPlugin extends Plugin {
 		chip.setAttr('aria-label', `Roll ${p.expression}`);
 		chip.addEventListener('click', (ev) => {
 			ev.preventDefault();
-			void go();
+			void go(true);
 		});
 		void go();
 		return chip;
 	}
 
 	// Genesys and Star Wars pools: the net result, each die on hover
-	private renderNarrative(p: Parsed): HTMLElement {
+	private renderNarrative(p: Parsed, sourcePath: string): HTMLElement {
 		const chip = createSpan({ cls: 'dice-tray dice-tray-narrative' });
 		const icon = chip.createSpan({ cls: 'dice-tray-icon' });
 		setIcon(icon, 'dices');
 		if (p.flags.has('nodice')) icon.hide();
 		const total = chip.createSpan({ cls: 'dice-tray-total' });
-		const go = () => {
+		const go = (clicked = false) => {
 			try {
 				const r = rollNarrative(p.expression);
 				chip.removeClass('dice-tray-error');
 				total.setText(p.text ?? narrativeText(r));
 				chip.title = `${p.expression}: ${narrativeDetail(r)}`;
+				if (clicked) this.announce(sourcePath, p.expression, `${p.expression}: ${narrativeText(r)}`);
 			} catch (e) {
 				this.renderError(chip, e);
 			}
@@ -210,7 +226,7 @@ export default class DiceTrayPlugin extends Plugin {
 		chip.setAttr('aria-label', `Roll ${p.expression}`);
 		chip.addEventListener('click', (ev) => {
 			ev.preventDefault();
-			go();
+			go(true);
 		});
 		go();
 		return chip;
@@ -230,9 +246,10 @@ export default class DiceTrayPlugin extends Plugin {
 		wrap.setAttr('role', 'button');
 		wrap.setAttr('aria-label', `Roll on ${n.link}`);
 
-		const go = async () => {
+		const go = async (clicked = false) => {
 			try {
 				const picks = await this.rollNote(n, sourcePath);
+				if (clicked) this.announce(sourcePath, p.expression, `[[${n.link}${n.block ? '#^' + n.block : n.heading ? '#' + n.heading : ''}]]: ${picks.join('; ')}`);
 				out.empty();
 				wrap.removeClass('dice-tray-error');
 				for (const text of picks) {
@@ -249,7 +266,7 @@ export default class DiceTrayPlugin extends Plugin {
 			// let links inside the result work
 			if ((ev.target as HTMLElement).closest('a')) return;
 			ev.preventDefault();
-			void go();
+			void go(true);
 		});
 		void go();
 		return wrap;
@@ -417,11 +434,14 @@ class RollModal extends Modal {
 					const n = rollNarrative(expr);
 					out.createDiv({ cls: 'dice-tray-modal-total', text: narrativeText(n) });
 					out.createDiv({ cls: 'dice-tray-modal-detail', text: narrativeDetail(n) });
+					this.plugin.announce(this.notePath, expr, `${expr}: ${narrativeText(n)}`);
 				} else {
 					// fields come from the note that was open when the modal was
-					const r = this.plugin.doRoll(expr, await this.plugin.noteVars(expr, this.notePath));
+					const vars = await this.plugin.noteVars(expr, this.notePath);
+					const r = this.plugin.doRoll(expr, vars);
 					out.createDiv({ cls: 'dice-tray-modal-total', text: formatNumber(r.total) });
 					out.createDiv({ cls: 'dice-tray-modal-detail', text: describe(r) });
+					this.plugin.announce(this.notePath, expr, spelledOut(r, vars));
 				}
 				const hist = [expr, ...this.plugin.settings.history.filter((h) => h !== expr)].slice(0, 8);
 				this.plugin.settings.history = hist;

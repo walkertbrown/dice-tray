@@ -46,10 +46,28 @@ There is also a command, **Roll dice**, that opens a small roller and remembers 
 | `1d66%` | two d6 read as tens and ones |
 | `3d[2,5]` | a die with faces from 2 to 5 |
 | `8d6s`, `8d6sd`, `3d6u` | sort ascending, sort descending, reroll duplicates |
+| `1dS` | Fantasy AGE: three d6, the last one the stunt die; doubles show the stunt points |
+| `1d20 + dex` | a number named in the note: frontmatter (`dex: 3`) or a field line (`dex:: 3`, `[dex:: 3]`) |
+| `2g1y2p`, `3g4d1s` | Genesys and Star Wars narrative dice (see below) |
 
 Flags go after a `|`: `` `dice: 3d6|avg` `` shows the average, `|noform` hides the formula, `|form` shows it, `|nodice` hides the icon, `|none` shows nothing until clicked, `|text(Roll me)` shows a label instead of the number.
 
 A lone d20 glows green on a natural 20 and red on a natural 1.
+
+## Narrative dice
+
+Letters name Genesys and Star Wars dice, each with an optional count: `g` or `a` ability, `y` proficiency, `d` difficulty, `r` or `c` challenge, `b` boost, `s` or `k` setback, `w` or `f` force. `p` is difficulty, or proficiency when the pool uses `a`, `c` or `d`. The chip shows the net result (`2 successes, 1 threat, 1 triumph`), and hovering lists each die.
+
+## Into your session log
+
+With [Session Log](https://github.com/walkertbrown/session-log) installed, a roll you click lands in your session log with the dice it showed:
+
+```
+- 20:16 Rolled 1d20 + dex -> [17] + 3 -> 20
+- 20:17 Rolled [[Encounters#Forest]]: Wolves
+```
+
+Only rolls you make count: a click on a roll, or the **Roll dice** command. The rolls a note makes as it opens are not logged.
 
 ## Rolling on notes
 
@@ -79,7 +97,7 @@ A table whose first column holds dice ranges is a lookup table: name the dice in
 
 ## Not yet
 
-Rolling a random note by tag (`dice: #tag`), `dice-mod:` writing results into the note, and the Dice View side panel are not in this release. If you use those, keep Dice Roller installed for now; the two plugins can run side by side.
+Rolling a random note by tag (`dice: #tag`), `dice-mod:` writing results into the note, saved results, and the Dice View side panel are not in this release. If you use those, keep Dice Roller installed for now; the two plugins can run side by side.
 
 ## Privacy
 

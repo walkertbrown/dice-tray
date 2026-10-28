@@ -149,6 +149,19 @@ describe('Dice Tray in a (fake) note', () => {
 		expect(el.querySelectorAll('.dice-tray-die-stunt').length).toBe(1);
 	});
 
+	it('announces a roll someone clicked, not the one the note makes as it opens', async () => {
+		const app = plugin.app as unknown as App;
+		app.events.length = 0;
+		const el = render(plugin, '<p><code>dice: 2d1 + 3</code> <code>dice: [[Encounters#Forest]]</code></p>');
+		await tick();
+		expect(app.events).toEqual([]);
+		(el.querySelector('.dice-tray') as HTMLElement).click();
+		(el.querySelector('.dice-tray-note') as HTMLElement).click();
+		await tick();
+		expect(app.events[0]).toEqual({ name: 'dice-tray:roll', data: { sourcePath: 'Game.md', expression: '2d1 + 3', text: '2d1 + 3 -> [1, 1] + 3 -> 5' } });
+		expect((app.events[1]!.data as { text: string }).text).toMatch(/^\[\[Encounters#Forest\]\]: (Wolves|A lost merchant|Bandits)$/);
+	});
+
 	it('reports a missing note', async () => {
 		const el = render(plugin, '<p><code>dice: [[Nowhere]]</code></p>');
 		await tick();

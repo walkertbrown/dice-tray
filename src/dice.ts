@@ -450,16 +450,21 @@ export function formatNumber(n: number): string {
 
 // The roll written out the way it happened, for writing into a note:
 // "3d100 + 12 -> [75, 20, 75] + 12 -> 182"
-export function spelledOut(r: RollResult): string {
+// Fields from the note show as their numbers: "1d20 + dex -> [17] + 3 -> 20"
+export function spelledOut(r: RollResult, vars: Record<string, number> = {}): string {
+	const fill = (t: string) => t.replace(/\b[A-Za-z_]\w*\b/g, (w) => {
+		const k = Object.keys(vars).find((x) => x.toLowerCase() === w.toLowerCase());
+		return k === undefined ? w : formatNumber(vars[k]!);
+	});
 	let rest = r.expression;
 	let mid = '';
 	for (const g of r.groups) {
 		const at = rest.indexOf(g.notation);
 		const kept = '[' + g.dice.filter((d) => d.kept).map((d) => d.value).join(', ') + ']';
 		if (at < 0) { mid += kept; continue; }
-		mid += rest.slice(0, at) + kept;
+		mid += fill(rest.slice(0, at)) + kept;
 		rest = rest.slice(at + g.notation.length);
 	}
-	mid += rest;
+	mid += fill(rest);
 	return mid === r.expression ? `${r.expression} -> ${formatNumber(r.total)}` : `${r.expression} -> ${mid} -> ${formatNumber(r.total)}`;
 }
