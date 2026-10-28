@@ -3,6 +3,7 @@ import {
 	Component,
 	editorInfoField,
 	editorLivePreviewField,
+	getAllTags,
 	ItemView,
 	MarkdownPostProcessorContext,
 	MarkdownRenderChild,
@@ -21,7 +22,7 @@ import { liveRolls, writeOver } from './live';
 import { average, describe, DiceError, formatNumber, roll, RollResult, spelledOut } from './dice';
 import { addDie, emptyPool, FACES, poolFormula, type Edge, type Face, type Pool } from './pool';
 import { isNarrative, narrativeDetail, narrativeText, rollNarrative } from './narrative';
-import { isLookupTable, lookupRow, NoteRoll, noteFields, parseLines, replaceInSection, parseList, parseNoteRoll, parseTable, pick, tableRows } from './notes';
+import { hasTag, isLookupTable, lookupRow, NoteRoll, noteFields, parseTagRoll, TagRoll, parseLines, replaceInSection, parseList, parseNoteRoll, parseTable, pick, tableRows } from './notes';
 
 interface DiceTraySettings {
 	defaultFaces: number;
@@ -52,6 +53,7 @@ interface Parsed {
 	flags: Set<string>;
 	text?: string;
 	note?: NoteRoll;
+	tag?: TagRoll;
 	mode: 'roll' | 'save' | 'mod';
 	saved?: string; // dice+: the result written after the expression
 }
@@ -78,16 +80,17 @@ function parseBlock(src: string): Parsed | null {
 		if (at >= 0) { saved = body.slice(at + 4).trim(); body = body.slice(0, at); }
 	}
 	const note = parseNoteRoll(body);
+	const tag = note ? null : parseTagRoll(body);
 	const parts = body.split('|').map((s) => s.trim());
-	const expression = note ? body : (parts.shift() ?? '');
+	const expression = note || tag ? body : (parts.shift() ?? '');
 	const flags = new Set<string>();
 	let text: string | undefined;
-	for (const p of note ? parts.slice(1) : parts) {
+	for (const p of note || tag ? parts.slice(1) : parts) {
 		const t = /^text\((.*)\)$/s.exec(p);
 		if (t) text = t[1];
 		else flags.add(p.toLowerCase());
 	}
-	return { expression, flags, text, note: note ?? undefined, mode, saved };
+	return { expression, flags, text, note: note ?? undefined, tag: tag ?? undefined, mode, saved };
 }
 
 // a word in the formula that isn't dice notation, like "dex" in `1d20 + dex`
@@ -240,6 +243,7 @@ export default class DiceTrayPlugin extends Plugin {
 
 	renderRoll(p: Parsed, ctx: MarkdownPostProcessorContext, at?: Place): HTMLElement {
 		if (p.note) return this.renderNoteRoll(p, p.note, ctx);
+		if (p.tag) return this.renderNoteRoll(p, p.tag, ctx);
 		if (isNarrative(p.expression)) return this.renderNarrative(p, ctx.sourcePath);
 		const chip = createSpan({ cls: 'dice-tray' });
 		if (p.flags.has('avg')) {
@@ -358,7 +362,8 @@ export default class DiceTrayPlugin extends Plugin {
 	}
 
 	// `dice: [[Note]]`, `dice: 2d[[Note^table]]|Column`: pick from a note.
-	private renderNoteRoll(p: Parsed, n: NoteRoll, ctx: MarkdownPostProcessorContext): HTMLElement {
+	private renderNoteRoll(p: Parsed, n: NoteRoll | TagRoll, ctx: MarkdownPostProcessorContext): HTMLElement {
+		const name = 'tag' in n ? `#${n.tag}` : n.link;
 		const sourcePath = ctx.sourcePath;
 		const wrap = createSpan({ cls: 'dice-tray dice-tray-note' });
 		// a render child scoped to this element, so rendered markdown is cleaned up with it
@@ -369,12 +374,13 @@ export default class DiceTrayPlugin extends Plugin {
 		if (p.flags.has('nodice')) icon.hide();
 		const out = wrap.createSpan({ cls: 'dice-tray-note-out' });
 		wrap.setAttr('role', 'button');
-		wrap.setAttr('aria-label', `Roll on ${n.link}`);
+		wrap.setAttr('aria-label', `Roll on ${name}`);
 
 		const go = async (clicked = false) => {
 			try {
-				const picks = await this.rollNote(n, sourcePath);
-				if (clicked) this.announce(sourcePath, p.expression, `[[${n.link}${n.block ? '#^' + n.block : n.heading ? '#' + n.heading : ''}]]: ${picks.join('; ')}`);
+				const picks = 'tag' in n ? await this.rollTag(n, sourcePath) : await this.rollNote(n, sourcePath);
+				const from = 'tag' in n ? name : `[[${n.link}${n.block ? '#^' + n.block : n.heading ? '#' + n.heading : ''}]]`;
+				if (clicked) this.announce(sourcePath, p.expression, `${from}: ${picks.join('; ')}`);
 				out.empty();
 				wrap.removeClass('dice-tray-error');
 				for (const text of picks) {
@@ -382,7 +388,7 @@ export default class DiceTrayPlugin extends Plugin {
 					if (p.flags.has('norender')) item.setText(text);
 					else await MarkdownRenderer.render(this.app, text, item, sourcePath, child);
 				}
-				wrap.title = `${n.count > 1 ? n.count + ' from ' : ''}${n.link}${n.block ? '^' + n.block : ''}`;
+				wrap.title = `${n.count > 1 ? n.count + ' from ' : ''}${name}${'block' in n && n.block ? '^' + n.block : ''}`;
 			} catch (e) {
 				this.renderError(wrap, e);
 			}
@@ -395,6 +401,23 @@ export default class DiceTrayPlugin extends Plugin {
 		});
 		void go();
 		return wrap;
+	}
+
+	/** A roll on a tag: a part of each note that has it (or of one, or a link to one), each led by a link to its note. */
+	private async rollTag(t: TagRoll, sourcePath: string): Promise<string[]> {
+		const notes = this.app.vault.getMarkdownFiles().filter((f) => {
+			const cache = f.path !== sourcePath ? this.app.metadataCache.getFileCache(f) : null;
+			return !!cache && hasTag(getAllTags(cache) ?? [], t.tag);
+		});
+		if (!notes.length) throw new DiceError(`No notes tagged #${t.tag}`);
+		const link = (f: TFile) => this.app.fileManager.generateMarkdownLink(f, sourcePath);
+		if (t.notes === 'link') return [link(pick(notes))];
+		const out: string[] = [];
+		for (const f of t.notes === 'one' ? [pick(notes)] : notes) {
+			const picks = await this.rollNote({ count: t.count, link: f.path.replace(/\.md$/, ''), mode: t.mode }, sourcePath);
+			out.push(`${link(f)}: ${picks.join('; ')}`);
+		}
+		return out;
 	}
 
 	private async rollNote(n: NoteRoll, sourcePath: string): Promise<string[]> {
@@ -450,7 +473,8 @@ export default class DiceTrayPlugin extends Plugin {
 				(s) => s.type !== 'heading' && s.type !== 'yaml' && s.type !== 'thematicBreak' &&
 					s.position.start.offset >= from && s.position.end.offset <= to,
 			);
-			pool = secs.map((s) => slice(s.position.start.offset, s.position.end.offset).trim()).filter(Boolean);
+			// a paragraph of only tags (`#npc #elf`) is the note's filing, not something to roll
+			pool = secs.map((s) => slice(s.position.start.offset, s.position.end.offset).trim()).filter((t) => t && !/^(#[^\s#]+\s*)+$/.test(t));
 			if (pool.length === 1) {
 				// one list or table under the heading: pick from inside it
 				const only = pool[0]!;

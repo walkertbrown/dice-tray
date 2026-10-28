@@ -108,6 +108,16 @@ A table whose first column holds dice ranges is a lookup table: name the dice in
 
 `` `dice: [[Tables^weather]]` `` rolls a d20 and shows that row. Results render as markdown; add `|norender` for plain text.
 
+## Rolling on a tag
+
+`` `dice: #npc` `` rolls on every note tagged `#npc` (or a tag nested under it, like `#npc/elf`) and shows a part of each, led by a link to its note. Tags in the text and in the note's properties both count, and the note the roll is in is left out.
+
+- `` `dice: #npc|-` `` picks one random note and shows a part of it.
+- `` `dice: #npc|link` `` gives just a link to one random note.
+- `` `dice: 2d#npc` `` takes two parts of each note; `|line`, `|list` and `|table` work as for a note roll.
+
+It needs no other plugin installed.
+
 ## The dice panel
 
 For rolls that aren't written in a note. Click the dice icon in the ribbon (or run **Open the dice panel**) and it opens in the sidebar:
@@ -119,10 +129,6 @@ For rolls that aren't written in a note. Click the dice icon in the ribbon (or r
 - **This session** lists every roll from the panel; click one to roll it again.
 
 Panel rolls go into your session log like any other.
-
-## Not yet
-
-Rolling a random note by tag (`dice: #tag`) is not in this release. If you use it, keep Dice Roller installed for now; the two plugins can run side by side.
 
 ## Privacy
 

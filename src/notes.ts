@@ -112,6 +112,37 @@ export function parseNoteRoll(src: string): NoteRoll | null {
 	return r;
 }
 
+/** `dice: #npc`: a roll on every note with a tag. Dice Roller's flags: `|-` one random note, `|+` every note (the
+ *  default), `|link` a link to a random note instead of a part of it. The rest are as for a note roll. */
+export interface TagRoll {
+	count: number;
+	tag: string; // without the #
+	notes: 'one' | 'every' | 'link';
+	mode: NoteRoll['mode'];
+}
+
+export function parseTagRoll(src: string): TagRoll | null {
+	const m = /^(?:(\d+)d)?\s*#([^\s|#]+)\s*(.*)$/s.exec(src.trim());
+	if (!m || /^\d+$/.test(m[2]!)) return null;
+	const r: TagRoll = { count: m[1] ? Number(m[1]) : 1, tag: m[2]!, notes: 'every', mode: 'section' };
+	for (const f of (m[3] ?? '').split('|').map((x) => x.trim().toLowerCase())) {
+		if (f === '-') r.notes = 'one';
+		else if (f === '+') r.notes = 'every';
+		else if (f === 'link') r.notes = 'link';
+		else if (f === 'line' || f === 'table' || f === 'list') r.mode = f;
+	}
+	return r;
+}
+
+/** Whether a note's tags (as Obsidian lists them, `#npc/elf`) carry `tag`: the tag itself or one nested under it. */
+export function hasTag(tags: readonly string[], tag: string): boolean {
+	const t = tag.toLowerCase();
+	return tags.some((x) => {
+		const y = x.replace(/^#/, '').toLowerCase();
+		return y === t || y.startsWith(t + '/');
+	});
+}
+
 // Numbers a note names, for formulas like `1d20 + dex`: frontmatter values first, then
 // Dataview-style `field:: 3` lines and `[field:: 3]` inline, which win. Names keep only
 // letters, digits and underscores, so "Armor Class:: 15" is `Armor_Class`.

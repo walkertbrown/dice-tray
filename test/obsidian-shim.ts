@@ -54,7 +54,18 @@ function cacheFor(content: string) {
 		if (secStart >= 0) sections.push({ type: secType, position: pos(secStart, end) });
 		secStart = -1;
 	};
+	// frontmatter is its own `yaml` section, as in Obsidian
+	const fmLines = /^---\n[\s\S]*?\n---(\n|$)/.exec(content)?.[0].replace(/\n$/, '').split('\n').length ?? 0;
+	let frontmatterPosition: ReturnType<typeof pos> | undefined;
 	lines.forEach((line, i) => {
+		if (i < fmLines) {
+			if (i === fmLines - 1) {
+				frontmatterPosition = pos(0, off + line.length);
+				sections.push({ type: 'yaml', position: frontmatterPosition });
+			}
+			off += line.length + 1;
+			return;
+		}
 		const h = /^(#+)\s+(.*)$/.exec(line);
 		if (h) {
 			closeSec(off - 1);
@@ -85,7 +96,15 @@ function cacheFor(content: string) {
 		frontmatter = {};
 		for (const m of fm[1]!.matchAll(/^(\w[\w ]*):\s*(.*)$/gm)) frontmatter[m[1]!] = /^-?\d+(\.\d+)?$/.test(m[2]!) ? Number(m[2]) : m[2];
 	}
-	return { headings, blocks, sections, frontmatter };
+	// #tags in the text (not headings), as Obsidian lists them
+	const tags = [...content.replace(/^---\n[\s\S]*?\n---/, '').matchAll(/(?:^|\s)(#[A-Za-z][\w/-]*)/g)].map((m) => ({ tag: m[1]! }));
+	return { headings, blocks, sections, frontmatter, frontmatterPosition, tags };
+}
+
+// Body tags and frontmatter `tags: [a, b]` (or `a, b`), each with its #.
+export function getAllTags(cache: { tags?: { tag: string }[]; frontmatter?: Record<string, unknown> }): string[] {
+	const fm = String(cache.frontmatter?.tags ?? '').split(/[\s,[\]]+/).filter(Boolean).map((t) => '#' + t.replace(/^#/, ''));
+	return [...(cache.tags ?? []).map((t) => t.tag), ...fm];
 }
 
 export class App {
@@ -105,7 +124,11 @@ export class App {
 			return n ? cacheFor(n.content) : null;
 		},
 	};
+	fileManager = {
+		generateMarkdownLink: (f: TFile) => `[[${f.basename.split('/').pop()}]]`,
+	};
 	vault = {
+		getMarkdownFiles: (): TFile[] => [...this.notes.values()].filter((n) => n.path.endsWith('.md')).map((n) => new TFile(n.path)),
 		cachedRead: async (f: TFile) => (this.notes.get(f.path) ?? this.notes.get(f.basename))!.content,
 		getFileByPath: (p: string): TFile | null => (this.notes.has(p) ? new TFile(p) : null),
 		process: async (f: TFile, fn: (data: string) => string) => {

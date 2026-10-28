@@ -77,6 +77,9 @@ The miller's son has not been seen since the fair.
 async function main() {
 	const app = new App();
 	app.notes.set('Encounters', { path: 'Encounters.md', content: NOTE });
+	app.notes.set('NPCs/Mira', { path: 'NPCs/Mira.md', content: '#npc\n\nMira, a healer with one eye. Owes the miller money.' });
+	app.notes.set('NPCs/Tobin', { path: 'NPCs/Tobin.md', content: '---\ntags: [npc]\n---\nTobin sells rope and asks too many questions.' });
+	app.notes.set('NPCs/Old Hesk', { path: 'NPCs/Old Hesk.md', content: '#npc\n\nOld Hesk keeps the ferry and remembers the last flood.' });
 	app.notes.set('Game.md', { path: 'Game.md', content: '# Session 12 prep\n\nstr:: 4\nwis:: 1\n' });
 	// what Session Log would write for each clicked roll
 	const log = document.querySelector<HTMLElement>('#log');

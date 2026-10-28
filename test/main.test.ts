@@ -173,6 +173,28 @@ describe('Dice Tray in a (fake) note', () => {
 		expect(el.querySelectorAll('.dice-tray-die-stunt').length).toBe(1);
 	});
 
+	it('rolls on a tag: a part of every tagged note, one note, or a link, and never the note it is in', async () => {
+		const app = plugin.app as unknown as App;
+		app.notes.set('NPCs/Mira', { path: 'NPCs/Mira.md', content: '#npc/elf\n\nA healer with one eye.' });
+		app.notes.set('NPCs/Tobin', { path: 'NPCs/Tobin.md', content: '---\ntags: [npc]\n---\nTobin sells rope.' });
+		app.notes.set('Places/Mill', { path: 'Places/Mill.md', content: '#place\n\nThe wheel turns at night.' });
+		const el = render(plugin, '<p><code>dice: #npc</code> <code>dice: #npc|-</code> <code>dice: #npc|link</code> <code>dice: #nobody</code></p>');
+		await tick();
+		await tick();
+		const [every, one, link, none] = Array.from(el.querySelectorAll('.dice-tray-note'));
+		const items = (e: Element) => Array.from(e.querySelectorAll('.dice-tray-note-item')).map((i) => i.textContent);
+		expect(items(every!)).toEqual(['[[Mira]]: A healer with one eye.', '[[Tobin]]: Tobin sells rope.']);
+		expect(['[[Mira]]: A healer with one eye.', '[[Tobin]]: Tobin sells rope.']).toContain(items(one!)[0]);
+		expect(items(one!)).toHaveLength(1);
+		expect(['[[Mira]]', '[[Tobin]]']).toContain(items(link!)[0]);
+		expect(none!.textContent).toContain('No notes tagged #nobody');
+		// rolled from inside a tagged note, that note is left out
+		const own = render(plugin, '<p><code>dice: #npc</code></p>', ctx('NPCs/Tobin.md'));
+		await tick();
+		await tick();
+		expect(items(own.querySelector('.dice-tray-note')!)).toEqual(['[[Mira]]: A healer with one eye.']);
+	});
+
 	it('announces a roll someone clicked, not the one the note makes as it opens', async () => {
 		const app = plugin.app as unknown as App;
 		app.events.length = 0;
