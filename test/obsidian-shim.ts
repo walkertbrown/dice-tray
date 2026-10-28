@@ -18,13 +18,13 @@ export function installDomHelpers() {
 	P.createSpan = function (this: HTMLElement, o?: Opts) { return make.call(this, 'span', o); };
 	P.createDiv = function (this: HTMLElement, o?: Opts) { return make.call(this, 'div', o); };
 	P.createEl = function (this: HTMLElement, tag: string, o?: Opts) { return make.call(this, tag, o); };
-	P.setText = function (t: string) { (this as HTMLElement).textContent = t; };
-	P.empty = function () { (this as HTMLElement).replaceChildren(); };
-	P.addClass = function (...c: string[]) { (this as HTMLElement).classList.add(...c); };
-	P.removeClass = function (...c: string[]) { (this as HTMLElement).classList.remove(...c); };
-	P.hide = function () { (this as HTMLElement).style.display = 'none'; };
-	P.show = function () { (this as HTMLElement).style.display = ''; };
-	P.setAttr = function (k: string, v: string) { (this as HTMLElement).setAttribute(k, v); };
+	P.setText = function (this: HTMLElement, t: string) { this.textContent = t; };
+	P.empty = function (this: HTMLElement) { this.replaceChildren(); };
+	P.addClass = function (this: HTMLElement, ...c: string[]) { this.classList.add(...c); };
+	P.removeClass = function (this: HTMLElement, ...c: string[]) { this.classList.remove(...c); };
+	P.hide = function (this: HTMLElement) { this.style.display = 'none'; };
+	P.show = function (this: HTMLElement) { this.style.display = ''; };
+	P.setAttr = function (this: HTMLElement, k: string, v: string) { this.setAttribute(k, v); };
 	(globalThis as unknown as Record<string, unknown>).createSpan = (o?: Opts) => make.call(undefined, 'span', o);
 	(globalThis as unknown as Record<string, unknown>).createDiv = (o?: Opts) => make.call(undefined, 'div', o);
 }
