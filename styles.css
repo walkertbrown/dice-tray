@@ -219,3 +219,84 @@
 	background: var(--dt-accent);
 	color: var(--text-on-accent);
 }
+
+/* the dice panel in the sidebar */
+.dice-tray-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 0.6em;
+}
+.dice-tray-panel-dice {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 0.4em;
+}
+.dice-tray-panel-die {
+	font-family: var(--font-monospace);
+	font-variant-numeric: tabular-nums;
+}
+.dice-tray-panel button.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+.dice-tray-panel-row {
+	display: flex;
+	align-items: center;
+	gap: 0.4em;
+}
+.dice-tray-panel-mod {
+	min-width: 2.5em;
+	text-align: center;
+	font-family: var(--font-monospace);
+	font-variant-numeric: tabular-nums;
+}
+.dice-tray-panel-edge:first-of-type {
+	margin-left: auto;
+}
+.dice-tray-panel .dice-tray-input {
+	width: 100%;
+	box-sizing: border-box;
+	font-family: var(--font-monospace);
+}
+.dice-tray-panel-out:empty {
+	display: none;
+}
+.dice-tray-panel h6 {
+	margin: 0.6em 0 0;
+	color: var(--text-muted);
+}
+.dice-tray-panel-saved {
+	display: inline-flex;
+}
+.dice-tray-panel-saved .dice-tray-panel-forget {
+	padding: 0 0.5em;
+	color: var(--text-muted);
+}
+.dice-tray-panel-empty {
+	color: var(--text-faint);
+	font-size: 0.85em;
+}
+.dice-tray-panel-rolls {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.dice-tray-panel-rolls li {
+	display: flex;
+	gap: 0.6em;
+	align-items: baseline;
+	padding: 0.3em 0.2em;
+	border-bottom: 1px solid var(--background-modifier-border);
+	cursor: pointer;
+	font-size: 0.9em;
+	overflow-wrap: anywhere;
+}
+.dice-tray-panel-rolls li:hover {
+	background: var(--background-modifier-hover);
+}
+.dice-tray-panel-total {
+	min-width: 2.5em;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	color: var(--interactive-accent);
+}

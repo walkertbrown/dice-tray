@@ -1,6 +1,6 @@
 // Browser demo: runs the real plugin against the test shim, over a sample note.
-import { App, MarkdownRenderer, ctx, installDomHelpers } from '../test/obsidian-shim';
-import DiceTrayPlugin from '../src/main';
+import { App, MarkdownRenderer, WorkspaceLeaf, ctx, installDomHelpers } from '../test/obsidian-shim';
+import DiceTrayPlugin, { DicePanel } from '../src/main';
 
 installDomHelpers();
 
@@ -118,6 +118,14 @@ async function main() {
 		if (ev.key === 'Enter') roll();
 	});
 	document.querySelector('#own-go')?.addEventListener('click', roll);
+	// the side panel, as it opens in Obsidian's sidebar
+	const side = document.querySelector<HTMLElement>('#panel');
+	if (side) {
+		plugin.settings.saved = ['1d20 + 5', '2d6 + 3'];
+		const panel = new DicePanel(new WorkspaceLeaf(app) as never, plugin);
+		side.appendChild(panel.contentEl);
+		await panel.onOpen();
+	}
 }
 
 void main();

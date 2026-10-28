@@ -3,8 +3,8 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('obsidian', () => import('./obsidian-shim'));
 
-import { App, ctx, installDomHelpers } from './obsidian-shim';
-import DiceTrayPlugin from '../src/main';
+import { App, ctx, installDomHelpers, Notice, WorkspaceLeaf } from './obsidian-shim';
+import DiceTrayPlugin, { DicePanel, PANEL } from '../src/main';
 
 installDomHelpers();
 
@@ -64,7 +64,7 @@ describe('Dice Tray in a (fake) note', () => {
 
 	it('registers a command and a settings tab', () => {
 		const p = plugin as never as { commands: { id: string }[]; settingTab: unknown };
-		expect(p.commands.map((c) => c.id)).toEqual(['roll']);
+		expect(p.commands.map((c) => c.id)).toEqual(['roll', 'open-panel']);
 		expect(p.settingTab).toBeTruthy();
 	});
 
@@ -234,5 +234,76 @@ describe('Dice Tray in a (fake) note', () => {
 		await tab.setControlValue('defaultFaces', 8);
 		expect(tab.getControlValue('defaultFaces')).toBe(8);
 		expect(plugin.doRoll('1d').groups[0]!.faces).toBe('8');
+	});
+});
+
+describe('the dice panel', () => {
+	async function panel() {
+		const { app, plugin } = await load();
+		const view = (plugin as never as { views: Record<string, (l: unknown) => DicePanel> }).views[PANEL]!(new WorkspaceLeaf(app));
+		await view.onOpen();
+		const el = view.contentEl;
+		const button = (text: string) => Array.from(el.querySelectorAll('button')).find((b) => b.textContent === text)!;
+		const input = el.querySelector<HTMLInputElement>('.dice-tray-input')!;
+		return { app, plugin, view, el, button, input };
+	}
+
+	it('builds the formula from the dice tapped in, the modifier and advantage', async () => {
+		const { el, button, input } = await panel();
+		const d6 = el.querySelectorAll<HTMLButtonElement>('.dice-tray-panel-die')[1]!;
+		d6.click();
+		d6.click();
+		expect(d6.textContent).toBe('2d6');
+		expect(d6.classList.contains('is-active')).toBe(true);
+		button('+').click();
+		button('+').click();
+		button('+').click();
+		expect(input.value).toBe('2d6 + 3');
+		d6.dispatchEvent(new MouseEvent('contextmenu'));
+		button('Adv').click();
+		expect(input.value).toBe('1d6 + 2d20kh1 + 3');
+		button('Clear').click();
+		expect(input.value).toBe('');
+	});
+
+	it('rolls, tells the other plugins, and keeps the roll in this session\'s list to roll again', async () => {
+		const { app, button, input, el } = await panel();
+		input.value = '1d1 + 4';
+		button('Roll').click();
+		await tick();
+		await tick();
+		expect(el.querySelector('.dice-tray-modal-total')!.textContent).toBe('5');
+		expect(app.events.at(-1)).toEqual({ name: 'dice-tray:roll', data: { sourcePath: '', expression: '1d1 + 4', text: '1d1 + 4 -> [1] + 4 -> 5' } });
+		const li = el.querySelector<HTMLElement>('.dice-tray-panel-rolls li')!;
+		expect(li.textContent).toBe('51d1 + 4 -> [1] + 4 -> 5');
+		li.click();
+		await tick();
+		await tick();
+		expect(el.querySelectorAll('.dice-tray-panel-rolls li')).toHaveLength(2);
+	});
+
+	it('saves a formula, rolls it from its chip, and forgets it', async () => {
+		const { plugin, button, input, el } = await panel();
+		input.value = '1d1 + 1';
+		button('Save').click();
+		await tick();
+		expect(plugin.settings.saved).toEqual(['1d1 + 1']);
+		button('1d1 + 1').click();
+		await tick();
+		await tick();
+		expect(el.querySelector('.dice-tray-modal-total')!.textContent).toBe('2');
+		el.querySelector<HTMLButtonElement>('.dice-tray-panel-forget')!.click();
+		await tick();
+		expect(plugin.settings.saved).toEqual([]);
+		expect(el.querySelector('.dice-tray-panel-empty')).not.toBeNull();
+	});
+
+	it('says what is wrong with a formula it cannot read', async () => {
+		const { button, input } = await panel();
+		input.value = '2d6 +';
+		button('Roll').click();
+		await tick();
+		await tick();
+		expect(Notice.last).not.toBe('');
 	});
 });

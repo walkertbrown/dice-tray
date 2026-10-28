@@ -1,7 +1,7 @@
 // A tiny stand-in for the `obsidian` module so main.ts can run under jsdom.
 // Only what Dice Tray touches is here.
 
-type Opts = { cls?: string; text?: string; type?: string; placeholder?: string };
+type Opts = { cls?: string; text?: string; type?: string; placeholder?: string; attr?: Record<string, string> };
 
 function make(this: HTMLElement | void, tag: string, o?: Opts): HTMLElement {
 	const el = document.createElement(tag);
@@ -9,6 +9,7 @@ function make(this: HTMLElement | void, tag: string, o?: Opts): HTMLElement {
 	if (o?.text) el.textContent = o.text;
 	if (o?.type) el.setAttribute('type', o.type);
 	if (o?.placeholder) el.setAttribute('placeholder', o.placeholder);
+	for (const [k, v] of Object.entries(o?.attr ?? {})) el.setAttribute(k, v);
 	if (this && this !== (globalThis as unknown)) (this as HTMLElement).appendChild(el);
 	return el;
 }
@@ -18,6 +19,7 @@ export function installDomHelpers() {
 	P.createSpan = function (this: HTMLElement, o?: Opts) { return make.call(this, 'span', o); };
 	P.createDiv = function (this: HTMLElement, o?: Opts) { return make.call(this, 'div', o); };
 	P.createEl = function (this: HTMLElement, tag: string, o?: Opts) { return make.call(this, tag, o); };
+	P.toggleClass = function (this: HTMLElement, c: string, on: boolean) { this.classList.toggle(c, on); };
 	P.setText = function (this: HTMLElement, t: string) { this.textContent = t; };
 	P.empty = function (this: HTMLElement) { this.replaceChildren(); };
 	P.addClass = function (this: HTMLElement, ...c: string[]) { this.classList.add(...c); };
@@ -131,6 +133,10 @@ export class Plugin extends Component {
 	registerMarkdownPostProcessor(fn: (el: HTMLElement, ctx: Ctx) => void) { this.postProcessors.push(fn); }
 	registerMarkdownCodeBlockProcessor(lang: string, fn: (src: string, el: HTMLElement, ctx: Ctx) => void) { this.codeBlocks[lang] = fn; }
 	addCommand(c: { id: string; name: string; callback: () => void }) { this.commands.push(c); }
+	views: Record<string, (leaf: WorkspaceLeaf) => unknown> = {};
+	registerView(type: string, fn: (leaf: WorkspaceLeaf) => unknown) { this.views[type] = fn; }
+	ribbon: { icon: string; title: string; fn: () => void }[] = [];
+	addRibbonIcon(icon: string, title: string, fn: () => void) { this.ribbon.push({ icon, title, fn }); return document.createElement('div'); }
 	addSettingTab(t: unknown) { this.settingTab = t; }
 	async loadData() { return this.data; }
 	async saveData(d: unknown) { this.data = d; }
@@ -140,6 +146,16 @@ export interface Section { text: string; lineStart: number; lineEnd: number }
 export interface Ctx { sourcePath: string; addChild: (c: Component) => void; getSectionInfo: (el: HTMLElement) => Section | null }
 export function ctx(sourcePath = 'Game.md', section: Section | null = null): Ctx {
 	return { sourcePath, addChild: () => {}, getSectionInfo: () => section };
+}
+
+export class WorkspaceLeaf {
+	view: unknown = null;
+	constructor(public app: App) {}
+}
+export class ItemView {
+	app: App;
+	contentEl = document.createElement('div');
+	constructor(public leaf: WorkspaceLeaf) { this.app = leaf.app; }
 }
 
 export class Modal {

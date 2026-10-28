@@ -106,9 +106,21 @@ A table whose first column holds dice ranges is a lookup table: name the dice in
 
 `` `dice: [[Tables^weather]]` `` rolls a d20 and shows that row. Results render as markdown; add `|norender` for plain text.
 
+## The dice panel
+
+For rolls that aren't written in a note. Click the dice icon in the ribbon (or run **Open the dice panel**) and it opens in the sidebar:
+
+- Tap a die to add it: d4, d6, d8, d10, d12, d20, d100 and Fate dice. Right-click takes one away.
+- Set a modifier with − and +, and roll a d20 at advantage or disadvantage.
+- Or type any formula into the box, in the same notation as above.
+- **Save** keeps a roll you make often as a button in the panel.
+- **This session** lists every roll from the panel; click one to roll it again.
+
+Panel rolls go into your session log like any other.
+
 ## Not yet
 
-Rolling a random note by tag (`dice: #tag`) and the Dice View side panel are not in this release. If you use those, keep Dice Roller installed for now; the two plugins can run side by side.
+Rolling a random note by tag (`dice: #tag`) is not in this release. If you use it, keep Dice Roller installed for now; the two plugins can run side by side.
 
 ## Privacy
 

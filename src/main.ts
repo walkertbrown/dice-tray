@@ -1,5 +1,6 @@
 import {
 	App,
+	ItemView,
 	MarkdownPostProcessorContext,
 	MarkdownRenderChild,
 	MarkdownRenderer,
@@ -9,9 +10,11 @@ import {
 	PluginSettingTab,
 	SettingDefinitionItem,
 	TFile,
+	WorkspaceLeaf,
 	setIcon,
 } from 'obsidian';
 import { average, describe, DiceError, formatNumber, roll, RollResult, spelledOut } from './dice';
+import { addDie, emptyPool, FACES, poolFormula, type Edge, type Face, type Pool } from './pool';
 import { isNarrative, narrativeDetail, narrativeText, rollNarrative } from './narrative';
 import { isLookupTable, lookupRow, NoteRoll, noteFields, parseLines, replaceInSection, parseList, parseNoteRoll, parseTable, pick, tableRows } from './notes';
 
@@ -21,6 +24,7 @@ interface DiceTraySettings {
 	animate: boolean;
 	rounding: 'none' | 'nearest' | 'up' | 'down';
 	history: string[]; // last expressions typed into the roll modal
+	saved: string[]; // formulas kept in the dice panel
 }
 
 const DEFAULT_SETTINGS: DiceTraySettings = {
@@ -29,7 +33,10 @@ const DEFAULT_SETTINGS: DiceTraySettings = {
 	animate: true,
 	rounding: 'none',
 	history: [],
+	saved: [],
 };
+
+export const PANEL = 'dice-tray-panel';
 
 // A `dice:` block is   dice: <expression> [|flag ...]
 // Flags understood from the Dice Roller plugin: nodice, noform, form, avg, none, text(...)
@@ -105,7 +112,42 @@ export default class DiceTrayPlugin extends Plugin {
 			name: 'Roll dice',
 			callback: () => new RollModal(this.app, this).open(),
 		});
+		this.registerView(PANEL, (leaf) => new DicePanel(leaf, this));
+		this.addRibbonIcon('dices', 'Open the dice panel', () => void this.openPanel());
+		this.addCommand({
+			id: 'open-panel',
+			name: 'Open the dice panel',
+			callback: () => void this.openPanel(),
+		});
 		this.addSettingTab(new DiceTraySettingTab(this.app, this));
+	}
+
+	async openPanel() {
+		const { workspace } = this.app;
+		const leaf = workspace.getLeavesOfType(PANEL)[0] ?? workspace.getRightLeaf(false);
+		if (!leaf) return;
+		await leaf.setViewState({ type: PANEL, active: true });
+		await workspace.revealLeaf(leaf);
+	}
+
+	/** A roll typed or built by hand (the roll window, the dice panel): rolled, announced, and kept in the recent list.
+	 *  Fields like `dex` come from the note that is open. Throws DiceError on a formula it can't read. */
+	async rollTyped(expr: string, notePath: string | undefined): Promise<{ total: string; detail: string; text: string }> {
+		let out;
+		if (isNarrative(expr)) {
+			const n = rollNarrative(expr);
+			out = { total: narrativeText(n), detail: narrativeDetail(n), text: `${expr}: ${narrativeText(n)}` };
+		} else {
+			const vars = await this.noteVars(expr, notePath);
+			const r = this.doRoll(expr, vars);
+			const text = spelledOut(r, vars);
+			// the roll as it happened, modifiers and all ("2d6 + 1 -> [2, 3] + 1 -> 6")
+			out = { total: formatNumber(r.total), detail: text, text };
+		}
+		this.announce(notePath, expr, out.text);
+		this.settings.history = [expr, ...this.settings.history.filter((h) => h !== expr)].slice(0, 8);
+		await this.saveSettings();
+		return out;
 	}
 
 	round(n: number): number {
@@ -511,22 +553,10 @@ class RollModal extends Modal {
 			if (!expr) return;
 			try {
 				out.empty();
-				if (isNarrative(expr)) {
-					const n = rollNarrative(expr);
-					out.createDiv({ cls: 'dice-tray-modal-total', text: narrativeText(n) });
-					out.createDiv({ cls: 'dice-tray-modal-detail', text: narrativeDetail(n) });
-					this.plugin.announce(this.notePath, expr, `${expr}: ${narrativeText(n)}`);
-				} else {
-					// fields come from the note that was open when the modal was
-					const vars = await this.plugin.noteVars(expr, this.notePath);
-					const r = this.plugin.doRoll(expr, vars);
-					out.createDiv({ cls: 'dice-tray-modal-total', text: formatNumber(r.total) });
-					out.createDiv({ cls: 'dice-tray-modal-detail', text: describe(r) });
-					this.plugin.announce(this.notePath, expr, spelledOut(r, vars));
-				}
-				const hist = [expr, ...this.plugin.settings.history.filter((h) => h !== expr)].slice(0, 8);
-				this.plugin.settings.history = hist;
-				await this.plugin.saveSettings();
+				// fields come from the note that was open when the modal was
+				const r = await this.plugin.rollTyped(expr, this.notePath);
+				out.createDiv({ cls: 'dice-tray-modal-total', text: r.total });
+				out.createDiv({ cls: 'dice-tray-modal-detail', text: r.detail });
 				showRecent();
 			} catch (e) {
 				new Notice(e instanceof DiceError ? e.message : 'Could not roll');
@@ -540,6 +570,145 @@ class RollModal extends Modal {
 	}
 	onClose() {
 		this.contentEl.empty();
+	}
+}
+
+/** The dice panel in the sidebar: tap dice into a pool, set a modifier and advantage, roll. Keeps formulas you save,
+ *  and this session's rolls, newest first, each a click from rolling again. */
+export class DicePanel extends ItemView {
+	pool: Pool = emptyPool();
+	rolls: { expr: string; text: string; total: string }[] = [];
+	private typed = false;
+	private input!: HTMLInputElement;
+	private out!: HTMLElement;
+	private savedEl!: HTMLElement;
+	private recentEl!: HTMLElement;
+	private dieButtons = new Map<Face, HTMLButtonElement>();
+	private edgeButtons = new Map<Edge, HTMLButtonElement>();
+	private modEl!: HTMLElement;
+
+	constructor(leaf: WorkspaceLeaf, private plugin: DiceTrayPlugin) {
+		super(leaf);
+	}
+	getViewType() { return PANEL; }
+	getDisplayText() { return 'Dice'; }
+	getIcon() { return 'dices'; }
+
+	async onOpen() {
+		const el = this.contentEl;
+		el.empty();
+		el.addClass('dice-tray-panel');
+		const dice = el.createDiv({ cls: 'dice-tray-panel-dice' });
+		for (const f of FACES) {
+			const b = dice.createEl('button', { cls: 'dice-tray-panel-die', attr: { 'aria-label': `Add a d${f}; right-click takes one away` } });
+			b.onclick = () => this.change(addDie(this.pool, f));
+			b.oncontextmenu = (e) => {
+				e.preventDefault();
+				this.change(addDie(this.pool, f, -1));
+			};
+			this.dieButtons.set(f, b);
+		}
+		const row = el.createDiv({ cls: 'dice-tray-panel-row' });
+		const minus = row.createEl('button', { text: '−', attr: { 'aria-label': 'Modifier down' } });
+		this.modEl = row.createSpan({ cls: 'dice-tray-panel-mod' });
+		const plus = row.createEl('button', { text: '+', attr: { 'aria-label': 'Modifier up' } });
+		minus.onclick = () => this.change({ ...this.pool, mod: this.pool.mod - 1 });
+		plus.onclick = () => this.change({ ...this.pool, mod: this.pool.mod + 1 });
+		for (const [edge, label] of [['advantage', 'Adv'], ['disadvantage', 'Dis']] as const) {
+			const b = row.createEl('button', { text: label, cls: 'dice-tray-panel-edge', attr: { 'aria-label': edge === 'advantage' ? 'Advantage' : 'Disadvantage' } });
+			b.onclick = () => this.change({ ...this.pool, edge: this.pool.edge === edge ? 'none' : edge });
+			this.edgeButtons.set(edge, b);
+		}
+		this.input = el.createEl('input', { type: 'text', cls: 'dice-tray-input', attr: { placeholder: 'Tap dice, or type 2d20kh1 + 5' } });
+		this.input.addEventListener('input', () => (this.typed = true));
+		this.input.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') void this.roll(this.input.value);
+		});
+		const actions = el.createDiv({ cls: 'dice-tray-panel-row' });
+		actions.createEl('button', { text: 'Roll', cls: 'mod-cta' }).onclick = () => void this.roll(this.input.value);
+		actions.createEl('button', { text: 'Clear' }).onclick = () => this.clear();
+		actions.createEl('button', { text: 'Save', attr: { 'aria-label': 'Keep this formula in the panel' } }).onclick = () => void this.save(this.input.value);
+		this.out = el.createDiv({ cls: 'dice-tray-panel-out' });
+		el.createEl('h6', { text: 'Saved' });
+		this.savedEl = el.createDiv({ cls: 'dice-tray-recent' });
+		el.createEl('h6', { text: 'This session' });
+		this.recentEl = el.createEl('ol', { cls: 'dice-tray-panel-rolls' });
+		this.draw();
+	}
+
+	async onClose() {
+		this.contentEl.empty();
+	}
+
+	change(p: Pool) {
+		this.pool = p;
+		this.typed = false;
+		this.draw();
+	}
+
+	clear() {
+		this.change(emptyPool());
+		this.out.empty();
+	}
+
+	async roll(expr: string) {
+		expr = expr.trim();
+		if (!expr) return;
+		try {
+			const r = await this.plugin.rollTyped(expr, this.app.workspace.getActiveFile()?.path);
+			this.out.empty();
+			this.out.createDiv({ cls: 'dice-tray-modal-total', text: r.total });
+			this.out.createDiv({ cls: 'dice-tray-modal-detail', text: r.detail });
+			this.rolls = [{ expr, text: r.text, total: r.total }, ...this.rolls].slice(0, 50);
+			this.drawRolls();
+		} catch (e) {
+			new Notice(e instanceof DiceError ? e.message : 'Could not roll');
+		}
+	}
+
+	async save(expr: string) {
+		expr = expr.trim();
+		if (!expr || this.plugin.settings.saved.includes(expr)) return;
+		this.plugin.settings.saved = [...this.plugin.settings.saved, expr];
+		await this.plugin.saveSettings();
+		this.drawSaved();
+	}
+
+	private draw() {
+		for (const [f, b] of this.dieButtons) {
+			const n = this.pool.dice[f] ?? 0;
+			b.setText(n ? `${n}d${f}` : `d${f}`);
+			b.toggleClass('is-active', n > 0);
+		}
+		for (const [edge, b] of this.edgeButtons) b.toggleClass('is-active', this.pool.edge === edge);
+		this.modEl.setText(this.pool.mod > 0 ? `+${this.pool.mod}` : String(this.pool.mod));
+		if (!this.typed) this.input.value = poolFormula(this.pool);
+		this.drawSaved();
+		this.drawRolls();
+	}
+
+	private drawSaved() {
+		this.savedEl.empty();
+		for (const expr of this.plugin.settings.saved) {
+			const chip = this.savedEl.createSpan({ cls: 'dice-tray-panel-saved' });
+			chip.createEl('button', { text: expr }).onclick = () => void this.roll(expr);
+			chip.createEl('button', { text: '×', cls: 'dice-tray-panel-forget', attr: { 'aria-label': `Forget ${expr}` } }).onclick = async () => {
+				this.plugin.settings.saved = this.plugin.settings.saved.filter((x) => x !== expr);
+				await this.plugin.saveSettings();
+				this.drawSaved();
+			};
+		}
+		if (!this.plugin.settings.saved.length) this.savedEl.createSpan({ cls: 'dice-tray-panel-empty', text: 'Save a formula to keep it here.' });
+	}
+
+	private drawRolls() {
+		this.recentEl.empty();
+		for (const r of this.rolls) {
+			const li = this.recentEl.createEl('li', { attr: { 'aria-label': 'Roll again' } });
+			li.createSpan({ cls: 'dice-tray-panel-total', text: r.total });
+			li.createSpan({ text: r.text });
+			li.onclick = () => void this.roll(r.expr);
+		}
 	}
 }
 
