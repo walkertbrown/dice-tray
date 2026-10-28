@@ -103,6 +103,11 @@ export class App {
 	vault = {
 		cachedRead: async (f: TFile) => (this.notes.get(f.path) ?? this.notes.get(f.basename))!.content,
 		getFileByPath: (p: string): TFile | null => (this.notes.has(p) ? new TFile(p) : null),
+		process: async (f: TFile, fn: (data: string) => string) => {
+			const n = (this.notes.get(f.path) ?? this.notes.get(f.basename))!;
+			n.content = fn(n.content);
+			return n.content;
+		},
 	};
 }
 
@@ -129,9 +134,10 @@ export class Plugin extends Component {
 	async saveData(d: unknown) { this.data = d; }
 }
 
-export interface Ctx { sourcePath: string; addChild: (c: Component) => void }
-export function ctx(sourcePath = 'Game.md'): Ctx {
-	return { sourcePath, addChild: () => {} };
+export interface Section { text: string; lineStart: number; lineEnd: number }
+export interface Ctx { sourcePath: string; addChild: (c: Component) => void; getSectionInfo: (el: HTMLElement) => Section | null }
+export function ctx(sourcePath = 'Game.md', section: Section | null = null): Ctx {
+	return { sourcePath, addChild: () => {}, getSectionInfo: () => section };
 }
 
 export class Modal {

@@ -127,3 +127,18 @@ export function noteFields(text: string, frontmatter?: Record<string, unknown>):
 	for (const m of text.matchAll(/[[(]([A-Za-z_][\w ]*?)::[ \t]*(-?\d+(?:\.\d+)?)[ \t]*[\])]/g)) put(m[1]!, m[2]);
 	return out;
 }
+
+// The note with the nth copy of `from` inside lines [lineStart, lineEnd] replaced by `to`,
+// or null if that copy is no longer there (the note changed under the reader).
+export function replaceInSection(note: string, lineStart: number, lineEnd: number, from: string, n: number, to: string): string | null {
+	const lines = note.split('\n');
+	const sec = lines.slice(lineStart, lineEnd + 1).join('\n');
+	let i = -1;
+	for (let k = 0; k <= n; k++) {
+		i = sec.indexOf(from, i + 1);
+		if (i < 0) return null;
+	}
+	const out = sec.slice(0, i) + to + sec.slice(i + from.length);
+	lines.splice(lineStart, lineEnd - lineStart + 1, ...out.split('\n'));
+	return lines.join('\n');
+}

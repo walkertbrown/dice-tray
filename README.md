@@ -69,6 +69,17 @@ With [Session Log](https://github.com/walkertbrown/session-log) installed, a rol
 
 Only rolls you make count: a click on a roll, or the **Roll dice** command. The rolls a note makes as it opens are not logged.
 
+## Rolls that stay
+
+Most rolls roll again each time the note opens. Two kinds keep their result in the note itself, as plain text you can read anywhere:
+
+| Write | What happens |
+| --- | --- |
+| `` `dice+: 1d20 + 5` `` | rolls once and writes the result after it: `` `dice+: 1d20 + 5 -> [17] + 5 -> 22` ``. The chip shows 22 every time the note opens. Click it to roll again and write the new result |
+| `` `dice-mod: 4d6dl1` `` | rolls once and replaces itself with the result: `4d6dl1 -> [5, 4, 3] -> 12`. Good for rolling up stats or loot that should not change |
+
+Both write into the note only in reading view or live preview, and only the copy you see.
+
 ## Rolling on notes
 
 Point a roll at a note and it picks from what is inside:
@@ -97,7 +108,7 @@ A table whose first column holds dice ranges is a lookup table: name the dice in
 
 ## Not yet
 
-Rolling a random note by tag (`dice: #tag`), `dice-mod:` writing results into the note, saved results, and the Dice View side panel are not in this release. If you use those, keep Dice Roller installed for now; the two plugins can run side by side.
+Rolling a random note by tag (`dice: #tag`) and the Dice View side panel are not in this release. If you use those, keep Dice Roller installed for now; the two plugins can run side by side.
 
 ## Privacy
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isLookupTable, lookupRow, noteFields, parseLines, parseList, parseNoteRoll, parseTable, pick, tableRows } from '../src/notes';
+import { isLookupTable, lookupRow, noteFields, parseLines, replaceInSection, parseList, parseNoteRoll, parseTable, pick, tableRows } from '../src/notes';
 
 const TABLE = `
 | d6 | Weather | Note |
@@ -71,5 +71,16 @@ describe('noteFields', () => {
 	});
 	it('turns spaces in names into underscores', () => {
 		expect(noteFields('Armor Class:: 15')).toEqual({ Armor_Class: 15 });
+	});
+});
+
+describe('replaceInSection', () => {
+	const note = 'a `x`\nb `x` `x`\nc `x`';
+	it('replaces the nth copy inside the section only', () => {
+		expect(replaceInSection(note, 1, 1, '`x`', 1, 'Y')).toBe('a `x`\nb `x` Y\nc `x`');
+		expect(replaceInSection(note, 1, 2, '`x`', 2, 'Y')).toBe('a `x`\nb `x` `x`\nc Y');
+	});
+	it('gives null when that copy is gone', () => {
+		expect(replaceInSection(note, 0, 0, '`x`', 1, 'Y')).toBeNull();
 	});
 });

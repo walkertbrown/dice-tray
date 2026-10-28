@@ -13,7 +13,7 @@ import {
 } from 'obsidian';
 import { average, describe, DiceError, formatNumber, roll, RollResult, spelledOut } from './dice';
 import { isNarrative, narrativeDetail, narrativeText, rollNarrative } from './narrative';
-import { isLookupTable, lookupRow, NoteRoll, noteFields, parseLines, parseList, parseNoteRoll, parseTable, pick, tableRows } from './notes';
+import { isLookupTable, lookupRow, NoteRoll, noteFields, parseLines, replaceInSection, parseList, parseNoteRoll, parseTable, pick, tableRows } from './notes';
 
 interface DiceTraySettings {
 	defaultFaces: number;
@@ -33,17 +33,31 @@ const DEFAULT_SETTINGS: DiceTraySettings = {
 
 // A `dice:` block is   dice: <expression> [|flag ...]
 // Flags understood from the Dice Roller plugin: nodice, noform, form, avg, none, text(...)
+// `dice+:` keeps its result in the note, as the line after its last " -> ": `dice+: 1d20 + 5 -> [17] + 5 -> 22`.
+// `dice-mod:` is rolled once and replaced by the plain text of the roll.
 interface Parsed {
 	expression: string;
 	flags: Set<string>;
 	text?: string;
 	note?: NoteRoll;
+	mode: 'roll' | 'save' | 'mod';
+	saved?: string; // dice+: the result written after the expression
 }
 
+// Where an inline roll sits in its note: its section's element, its text, and which copy of that text it is.
+// `gone` is shared by the section's rolls: copies already rewritten, so a later copy's count goes down by those before it.
+interface Place { el: HTMLElement; src: string; n: number; gone: { src: string; n: number }[] }
+
 function parseBlock(src: string): Parsed | null {
-	const m = /^dice(?:\+|-|-mod)?:\s*(.+)$/is.exec(src.trim());
+	const m = /^dice(\+|-mod|-)?:\s*(.+)$/is.exec(src.trim());
 	if (!m) return null;
-	const body = m[1] as string;
+	const mode = m[1] === '+' ? 'save' : m[1] === '-mod' ? 'mod' : 'roll';
+	let body = m[2] as string;
+	let saved: string | undefined;
+	if (mode === 'save') {
+		const at = body.indexOf(' -> ');
+		if (at >= 0) { saved = body.slice(at + 4).trim(); body = body.slice(0, at); }
+	}
 	const note = parseNoteRoll(body);
 	const parts = body.split('|').map((s) => s.trim());
 	const expression = note ? body : (parts.shift() ?? '');
@@ -54,7 +68,7 @@ function parseBlock(src: string): Parsed | null {
 		if (t) text = t[1];
 		else flags.add(p.toLowerCase());
 	}
-	return { expression, flags, text, note: note ?? undefined };
+	return { expression, flags, text, note: note ?? undefined, mode, saved };
 }
 
 // a word in the formula that isn't dice notation, like "dex" in `1d20 + dex`
@@ -125,15 +139,39 @@ export default class DiceTrayPlugin extends Plugin {
 
 	private processInline(el: HTMLElement, ctx: MarkdownPostProcessorContext) {
 		const codes = el.querySelectorAll('code');
+		const copies = new Map<string, number>();
+		const gone: Place['gone'] = [];
 		for (const code of Array.from(codes)) {
 			if (code.closest('pre')) continue;
-			const p = parseBlock(code.textContent ?? '');
+			const src = code.textContent ?? '';
+			const n = copies.get(src) ?? 0;
+			copies.set(src, n + 1);
+			const p = parseBlock(src);
 			if (!p) continue;
-			code.replaceWith(this.renderRoll(p, ctx));
+			code.replaceWith(this.renderRoll(p, ctx, { el, src, n, gone }));
 		}
 	}
 
-	renderRoll(p: Parsed, ctx: MarkdownPostProcessorContext): HTMLElement {
+	// Rewrites an inline roll in the note's text. False when its place can't be found (an embed, a hover, a changed note).
+	async rewrite(ctx: MarkdownPostProcessorContext, at: Place, to: string): Promise<boolean> {
+		const info = ctx.getSectionInfo(at.el);
+		const file = this.app.vault.getFileByPath(ctx.sourcePath);
+		if (!info || !file) return false;
+		let done = false;
+		const was = { src: at.src, n: at.n };
+		await this.app.vault.process(file, (data) => {
+			// counted here, as writes happen one at a time, after any earlier copy's
+			const n = was.n - at.gone.filter((g) => g.src === was.src && g.n < was.n).length;
+			const out = replaceInSection(data, info.lineStart, info.lineEnd, '`' + was.src + '`', n, to);
+			if (out === null) return data;
+			done = true;
+			at.gone.push(was);
+			return out;
+		});
+		return done;
+	}
+
+	renderRoll(p: Parsed, ctx: MarkdownPostProcessorContext, at?: Place): HTMLElement {
 		if (p.note) return this.renderNoteRoll(p, p.note, ctx);
 		if (isNarrative(p.expression)) return this.renderNarrative(p, ctx.sourcePath);
 		const chip = createSpan({ cls: 'dice-tray' });
@@ -189,7 +227,16 @@ export default class DiceTrayPlugin extends Plugin {
 				this.renderError(chip, e);
 				return;
 			}
-			if (clicked) this.announce(ctx.sourcePath, p.expression, spelledOut(r, vars));
+			const line = spelledOut(r, vars);
+			if (clicked) this.announce(ctx.sourcePath, p.expression, line);
+			if (at && p.mode === 'mod') {
+				// replaced by its text for good; if it can't be, it stays a roll
+				if (await this.rewrite(ctx, at, line)) return;
+			}
+			if (at && p.mode === 'save') {
+				const src = `dice+: ${p.expression} -> ${line.slice(line.indexOf(' -> ') + 4)}`;
+				if (await this.rewrite(ctx, at, '`' + src + '`')) at.src = src;
+			}
 			if (this.settings.animate && !p.flags.has('none')) this.tumble(chip, total, () => showResult(r));
 			else showResult(r);
 		};
@@ -200,7 +247,14 @@ export default class DiceTrayPlugin extends Plugin {
 			ev.preventDefault();
 			void go(true);
 		});
-		void go();
+		if (p.mode === 'save' && p.saved !== undefined) {
+			// already rolled: show what the note says, and roll again only on a click
+			const cut = p.saved.lastIndexOf(' -> ');
+			const last = cut < 0 ? p.saved : p.saved.slice(cut + 4);
+			total.setText(p.text ?? last);
+			chip.title = `${p.expression} -> ${p.saved}`;
+			chip.addClass('dice-tray-saved');
+		} else void go();
 		return chip;
 	}
 

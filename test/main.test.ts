@@ -47,10 +47,10 @@ async function load() {
 	return { app, plugin };
 }
 
-function render(plugin: DiceTrayPlugin, html: string): HTMLElement {
+function render(plugin: DiceTrayPlugin, html: string, c = ctx()): HTMLElement {
 	const el = document.createElement('div');
 	el.innerHTML = html;
-	for (const pp of (plugin as never as { postProcessors: ((e: HTMLElement, c: unknown) => void)[] }).postProcessors) pp(el, ctx());
+	for (const pp of (plugin as never as { postProcessors: ((e: HTMLElement, c: unknown) => void)[] }).postProcessors) pp(el, c);
 	return el;
 }
 
@@ -160,6 +160,42 @@ describe('Dice Tray in a (fake) note', () => {
 		await tick();
 		expect(app.events[0]).toEqual({ name: 'dice-tray:roll', data: { sourcePath: 'Game.md', expression: '2d1 + 3', text: '2d1 + 3 -> [1, 1] + 3 -> 5' } });
 		expect((app.events[1]!.data as { text: string }).text).toMatch(/^\[\[Encounters#Forest\]\]: (Wolves|A lost merchant|Bandits)$/);
+	});
+
+	it('dice+ writes its result into the note, shows it on the next open, and rerolls on a click', async () => {
+		const app = plugin.app as unknown as App;
+		const note = 'Intro\n\nHits `dice: 1d1` for `dice+: 2d1 + 3`, again `dice+: 2d1 + 3`.\n';
+		app.notes.set('Saved.md', { path: 'Saved.md', content: note });
+		const html = '<p>Hits <code>dice: 1d1</code> for <code>dice+: 2d1 + 3</code>, again <code>dice+: 2d1 + 3</code>.</p>';
+		const where = ctx('Saved.md', { text: note, lineStart: 2, lineEnd: 2 });
+		render(plugin, html, where);
+		await tick(); await tick();
+		const saved = 'Hits `dice: 1d1` for `dice+: 2d1 + 3 -> [1, 1] + 3 -> 5`, again `dice+: 2d1 + 3 -> [1, 1] + 3 -> 5`.';
+		expect(app.notes.get('Saved.md')!.content).toBe(`Intro\n\n${saved}\n`);
+		app.events.length = 0;
+		const again = render(plugin, `<p>${saved.replace(/`([^`]+)`/g, '<code>$1</code>')}</p>`, where);
+		const chip = again.querySelectorAll('.dice-tray-saved')[1] as HTMLElement;
+		expect(chip.querySelector('.dice-tray-total')!.textContent).toBe('5');
+		expect(chip.title).toBe('2d1 + 3 -> [1, 1] + 3 -> 5');
+		expect(app.events).toEqual([]);
+		chip.click();
+		await tick(); await tick();
+		expect(app.events.length).toBe(1);
+		expect(app.notes.get('Saved.md')!.content).toBe(`Intro\n\n${saved}\n`); // same dice, same text
+	});
+
+	it('dice-mod is replaced by the plain text of its roll', async () => {
+		const app = plugin.app as unknown as App;
+		app.notes.set('Mod.md', { path: 'Mod.md', content: 'Gold: `dice-mod: 3d1 * 10`\n' });
+		render(plugin, '<p>Gold: <code>dice-mod: 3d1 * 10</code></p>', ctx('Mod.md', { text: '', lineStart: 0, lineEnd: 0 }));
+		await tick(); await tick();
+		expect(app.notes.get('Mod.md')!.content).toBe('Gold: 3d1 * 10 -> [1, 1, 1] * 10 -> 30\n');
+	});
+
+	it('rolls without saving where the note cannot be found', async () => {
+		const el = render(plugin, '<p><code>dice+: 1d1 + 1</code></p>');
+		await tick();
+		expect(el.querySelector('.dice-tray-total')!.textContent).toBe('2');
 	});
 
 	it('reports a missing note', async () => {
