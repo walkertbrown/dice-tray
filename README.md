@@ -91,6 +91,10 @@ From Obsidian: Settings → Community plugins → Browse → search "Dice Tray".
 
 By hand: copy `main.js`, `manifest.json` and `styles.css` from the latest release into `<your vault>/.obsidian/plugins/dice-tray/`, then enable it under Community plugins.
 
+## Also from this maker
+
+[Quick Initiative](https://github.com/walkertbrown/quick-initiative) is a light initiative tracker that keeps the whole fight as plain text in your note and reads Fantasy Statblocks creature notes.
+
 ## Source
 
 https://github.com/walkertbrown/dice-tray
