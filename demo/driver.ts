@@ -74,6 +74,16 @@ The miller's son has not been seen since the fair.
 async function main() {
 	const app = new App();
 	app.notes.set('Encounters', { path: 'Encounters.md', content: NOTE });
+	app.notes.set('Game.md', { path: 'Game.md', content: '# Session 12 prep\n\nstr:: 4\nwis:: 1\n' });
+	// what Session Log would write for each clicked roll
+	const log = document.querySelector<HTMLElement>('#log');
+	app.workspace.trigger = (name: string, data: unknown) => {
+		if (name !== 'dice-tray:roll' || !log) return;
+		const d = new Date();
+		const li = document.createElement('li');
+		li.textContent = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')} Rolled ${(data as { text: string }).text}`;
+		log.appendChild(li);
+	};
 	const plugin = new DiceTrayPlugin(app as never, { id: 'dice-tray' } as never);
 	await plugin.onload();
 	const pps = (plugin as never as { postProcessors: ((e: HTMLElement, c: unknown) => void)[] }).postProcessors;
