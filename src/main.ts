@@ -215,22 +215,25 @@ export default class DiceTrayPlugin extends Plugin {
 		const content = await this.app.vault.cachedRead(file);
 		const slice = (from: number, to: number) => content.slice(from, to);
 
-		let text = content;
-		// narrow to a block or a heading's section
+		// narrow to a block or a heading's section: [from, to) offsets in the note
+		let from = 0;
+		let to = content.length;
 		if (n.block) {
 			const b = cache?.blocks?.[n.block];
 			if (!b) throw new DiceError(`No block ^${n.block} in "${n.link}"`);
-			text = slice(b.position.start.offset, b.position.end.offset);
+			from = b.position.start.offset;
+			to = b.position.end.offset;
 		} else if (n.heading) {
 			const hs = cache?.headings ?? [];
 			const i = hs.findIndex((h) => h.heading.toLowerCase() === n.heading!.toLowerCase());
 			if (i < 0) throw new DiceError(`No heading "${n.heading}" in "${n.link}"`);
-			const start = hs[i]!.position.end.offset;
+			from = hs[i]!.position.end.offset;
 			const next = hs.slice(i + 1).find((h) => h.level <= hs[i]!.level);
-			text = slice(start, next ? next.position.start.offset : content.length);
+			if (next) to = next.position.start.offset;
 		} else if (cache?.frontmatterPosition) {
-			text = slice(cache.frontmatterPosition.end.offset, content.length);
+			from = cache.frontmatterPosition.end.offset;
 		}
+		const text = slice(from, to);
 
 		const table = n.mode === 'auto' || n.mode === 'table' ? parseTable(text) : null;
 		let pool: string[];
@@ -252,14 +255,19 @@ export default class DiceTrayPlugin extends Plugin {
 			pool = parseLines(text);
 		} else if (n.mode === 'list' || (n.mode === 'auto' && parseList(text))) {
 			pool = parseList(text) ?? [];
-		} else if (n.mode === 'section' && !n.block) {
-			// whole sections of the note, by the metadata cache
+		} else if (n.mode === 'section') {
+			// whole sections of the note (or of the heading), by the metadata cache
 			const secs = (cache?.sections ?? []).filter(
 				(s) => s.type !== 'heading' && s.type !== 'yaml' && s.type !== 'thematicBreak' &&
-					s.position.start.offset >= content.length - text.length - 1,
+					s.position.start.offset >= from && s.position.end.offset <= to,
 			);
 			pool = secs.map((s) => slice(s.position.start.offset, s.position.end.offset).trim()).filter(Boolean);
-			if (n.heading) pool = pool.filter((s) => text.includes(s));
+			if (pool.length === 1) {
+				// one list or table under the heading: pick from inside it
+				const only = pool[0]!;
+				const t = parseTable(only);
+				pool = t ? tableRows(t) : (parseList(only) ?? pool);
+			}
 		} else {
 			pool = parseLines(text);
 		}
