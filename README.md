@@ -4,6 +4,10 @@ Roll dice inside your notes. Write `` `dice: 2d20kh1 + 5` `` and the note shows 
 
 It reads the same notation as the Dice Roller plugin's `dice:` blocks, so notes written for that plugin keep working here.
 
+![Dice Tray rolling dice, lookup tables and random encounters inside a note](docs/demo.png)
+
+**Try it in your browser** before installing: https://bulkhead.bananafest-destiny.com/press/dice-tray/ runs the real plugin code over a sample note.
+
 ## Writing a roll
 
 Inline, anywhere in a note:
