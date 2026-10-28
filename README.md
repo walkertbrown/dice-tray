@@ -95,6 +95,7 @@ By hand: copy `main.js`, `manifest.json` and `styles.css` from the latest releas
 
 - [Quick Initiative](https://github.com/walkertbrown/quick-initiative): a light initiative tracker that keeps the whole fight as plain text in your note and reads Fantasy Statblocks creature notes.
 - [Session Log](https://github.com/walkertbrown/session-log): a quick log for game night that writes timestamped lines into your session note.
+- [Encounter Builder](https://github.com/walkertbrown/encounter-builder): plan fights against the 5E XP budget, then start them in Quick Initiative.
 
 ## Source
 
